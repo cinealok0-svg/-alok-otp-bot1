@@ -660,7 +660,7 @@ const buildHTML = () => `
     </script>
 </body>
 </html>
-\`;
+`;
 
 // ==========================================
 // 2. BACKEND: CLOUDFLARE WORKER ROUTER
@@ -695,7 +695,7 @@ export default {
                 }
                 
                 // Call Grizzly API
-                const res = await fetch(\`\${GRIZZLY_BASE}?api_key=\${GRIZZLY_API_KEY}&action=getNumber&service=\${body.service}&country=\${body.country}\`);
+                const res = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getNumber&service=${body.service}&country=${body.country}`);
                 const text = await res.text();
                 
                 if (text.startsWith("ACCESS_NUMBER")) {
@@ -703,13 +703,13 @@ export default {
                     await adjustBalance(body.userId, -parseFloat(body.price), env);
                     
                     const orderData = { actId, userId: body.userId, cost: parseFloat(body.price), phone, service: body.service, status: "WAITING", code: null };
-                    await env.USERS_DB.put(\`act:\${actId}\`, JSON.stringify(orderData));
+                    await env.USERS_DB.put(`act:${actId}`, JSON.stringify(orderData));
                     
                     // Track user's active orders index
-                    let userOrdersStr = await env.USERS_DB.get(\`user_orders:\${body.userId}\`);
+                    let userOrdersStr = await env.USERS_DB.get(`user_orders:${body.userId}`);
                     let userOrders = userOrdersStr ? JSON.parse(userOrdersStr) : [];
                     userOrders.push(actId);
-                    await env.USERS_DB.put(\`user_orders:\${body.userId}\`, JSON.stringify(userOrders));
+                    await env.USERS_DB.put(`user_orders:${body.userId}`, JSON.stringify(userOrders));
 
                     return new Response(JSON.stringify({ success: true, actId, phone }), { headers: { "Content-Type": "application/json" } });
                 }
@@ -717,53 +717,53 @@ export default {
             }
 
             if (body.action === 'get_orders') {
-                let userOrdersStr = await env.USERS_DB.get(\`user_orders:\${body.userId}\`);
+                let userOrdersStr = await env.USERS_DB.get(`user_orders:${body.userId}`);
                 let userOrderIds = userOrdersStr ? JSON.parse(userOrdersStr) : [];
                 let activeOrders = [];
                 
                 for (let actId of userOrderIds) {
-                    let oStr = await env.USERS_DB.get(\`act:\${actId}\`);
+                    let oStr = await env.USERS_DB.get(`act:${actId}`);
                     if (oStr) activeOrders.push(JSON.parse(oStr));
                 }
                 return new Response(JSON.stringify({ orders: activeOrders.reverse() }), { headers: { "Content-Type": "application/json" } });
             }
 
             if (body.action === 'status') {
-                const res = await fetch(\`\${GRIZZLY_BASE}?api_key=\${GRIZZLY_API_KEY}&action=getStatus&id=\${body.actId}\`);
+                const res = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getStatus&id=${body.actId}`);
                 const text = await res.text();
                 
                 if (text.startsWith("STATUS_OK")) {
                     const code = text.split(":")[1];
-                    let oStr = await env.USERS_DB.get(\`act:\${body.actId}\`);
+                    let oStr = await env.USERS_DB.get(`act:${body.actId}`);
                     if(oStr) {
                         let order = JSON.parse(oStr);
                         order.status = 'OK';
                         order.code = code;
-                        await env.USERS_DB.put(\`act:\${body.actId}\`, JSON.stringify(order));
+                        await env.USERS_DB.put(`act:${body.actId}`, JSON.stringify(order));
                     }
-                    await fetch(\`\${GRIZZLY_BASE}?api_key=\${GRIZZLY_API_KEY}&action=setStatus&status=6&id=\${body.actId}\`);
+                    await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=setStatus&status=6&id=${body.actId}`);
                     return new Response(JSON.stringify({ status: 'OK', code }), { headers: { "Content-Type": "application/json" } });
                 }
                 return new Response(JSON.stringify({ status: text }), { headers: { "Content-Type": "application/json" } });
             }
 
             if (body.action === 'cancel') {
-                const orderStr = await env.USERS_DB.get(\`act:\${body.actId}\`);
+                const orderStr = await env.USERS_DB.get(`act:${body.actId}`);
                 if (!orderStr) return new Response(JSON.stringify({ success: false, message: "Order not found" }), { headers: { "Content-Type": "application/json" } });
                 const order = JSON.parse(orderStr);
                 
-                const res = await fetch(\`\${GRIZZLY_BASE}?api_key=\${GRIZZLY_API_KEY}&action=setStatus&status=8&id=\${body.actId}\`);
+                const res = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=setStatus&status=8&id=${body.actId}`);
                 const text = await res.text();
                 
                 if (text === "ACCESS_CANCEL" || text === "STATUS_CANCEL") {
                     await adjustBalance(body.userId, order.cost, env);
-                    await env.USERS_DB.delete(\`act:\${body.actId}\`);
+                    await env.USERS_DB.delete(`act:${body.actId}`);
                     
                     // Cleanup user order list
-                    let userOrdersStr = await env.USERS_DB.get(\`user_orders:\${body.userId}\`);
+                    let userOrdersStr = await env.USERS_DB.get(`user_orders:${body.userId}`);
                     if (userOrdersStr) {
                         let userOrders = JSON.parse(userOrdersStr).filter(id => id !== body.actId);
-                        await env.USERS_DB.put(\`user_orders:\${body.userId}\`, JSON.stringify(userOrders));
+                        await env.USERS_DB.put(`user_orders:${body.userId}`, JSON.stringify(userOrders));
                     }
                     return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json" } });
                 }
@@ -781,7 +781,7 @@ export default {
 
             if (text.startsWith("/start")) {
                 const user = await getUser(userId, env);
-                const welcomeText = \`👑 *Welcome to AlokOTP Pro Store*\n\n💰 *Wallet Balance:* \\\`$\${user.balance.toFixed(2)}\\\`\n🆔 *Telegram User ID:* \\\`\${userId}\\\`\n\n⚡ Buy virtual SMS numbers for WhatsApp, Telegram, Google & 2000+ services with 100% auto refund!\`;
+                const welcomeText = `👑 *Welcome to AlokOTP Pro Store*\n\n💰 *Wallet Balance:* \`$${user.balance.toFixed(2)}\`\n🆔 *Telegram User ID:* \`${userId}\`\n\n⚡ Buy virtual SMS numbers for WhatsApp, Telegram, Google & 2000+ services with 100% auto refund!`;
                 const kb = { 
                     inline_keyboard: [
                         [{ text: "🚀 Open Web App Store", web_app: { url: request.url } }],
@@ -798,12 +798,12 @@ export default {
                     const parts = text.split(" ");
                     if (parts.length === 3) {
                         const newBal = await adjustBalance(parts[1], parseFloat(parts[2]), env);
-                        await sendTgMessage(chatId, \`✅ Successfully added \\\`$\${parts[2]}\\\` to user \\\`\${parts[1]}\\\`.\nNew Balance: \\\`$\${newBal.toFixed(2)}\\\`\`);
+                        await sendTgMessage(chatId, `✅ Successfully added \`$${parts[2]}\` to user \`${parts[1]}\`.\nNew Balance: \`$${newBal.toFixed(2)}\``);
                     }
                 } else if (text.startsWith("/setupi")) {
                     const upi = text.replace("/setupi", "").trim();
                     await env.USERS_DB.put("admin:upi", upi);
-                    await sendTgMessage(chatId, \`✅ Deposit UPI Address set to: \\\`\${upi}\\\`\`);
+                    await sendTgMessage(chatId, `✅ Deposit UPI Address set to: \`${upi}\``);
                 }
             }
         }
@@ -815,13 +815,13 @@ export default {
             
             if (cb.data === "admin_panel" && userId === ADMIN_ID.toString()) {
                 const upi = await env.USERS_DB.get("admin:upi") || "Not Set";
-                const gBalRes = await fetch(\`\${GRIZZLY_BASE}?api_key=\${GRIZZLY_API_KEY}&action=getBalance\`);
+                const gBalRes = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getBalance`);
                 const gBal = await gBalRes.text();
 
-                const txt = \`🛡️ *Admin Control Dashboard*\n\n🐻 *Grizzly API Balance:* \\\`\${gBal}\\\`\n🏦 *Current UPI:* \\\`\${upi}\\\`\n📈 *Profit Margin:* \\\`\${PROFIT_PERCENTAGE * 100}%\\\`\n\n*Admin Commands:*\n➕ Add Balance: \\\`/add <UserID> <Amount>\\\`\n🏦 Set UPI: \\\`/setupi <your_upi@bank>\\\`\`;
+                const txt = `🛡️ *Admin Control Dashboard*\n\n🐻 *Grizzly API Balance:* \`${gBal}\`\n🏦 *Current UPI:* \`${upi}\`\n📈 *Profit Margin:* \`${PROFIT_PERCENTAGE * 100}%\`\n\n*Admin Commands:*\n➕ Add Balance: \`/add <UserID> <Amount>\`\n🏦 Set UPI: \`/setupi <your_upi@bank>\``;
                 await sendTgMessage(chatId, txt);
             }
-            await fetch(\`https://api.telegram.org/bot\${BOT_TOKEN}/answerCallbackQuery\`, { method: "POST", body: JSON.stringify({ callback_query_id: cb.id }) });
+            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, { method: "POST", body: JSON.stringify({ callback_query_id: cb.id }) });
         }
 
       } catch (err) { console.error(err); }
@@ -835,7 +835,7 @@ export default {
 // ==========================================
 async function fetchLiveStock(serviceCode) {
     try {
-        const url = \`\${GRIZZLY_BASE}?api_key=\${GRIZZLY_API_KEY}&action=getPricesV3&service=\${serviceCode}\`;
+        const url = `${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getPricesV3&service=${serviceCode}`;
         const res = await fetch(url);
         const data = await res.json();
         
@@ -847,7 +847,7 @@ async function fetchLiveStock(serviceCode) {
                 if (stock > 0) {
                     const baseCost = parseFloat(item.price || item.cost || 0.15);
                     const finalPrice = (baseCost * (1 + PROFIT_PERCENTAGE)).toFixed(2);
-                    availableStock.push({ id: cId, name: COUNTRY_MAP[cId]?.name || \`Country \${cId}\`, stock, price: finalPrice });
+                    availableStock.push({ id: cId, name: COUNTRY_MAP[cId]?.name || `Country ${cId}`, stock, price: finalPrice });
                 }
             }
         }
@@ -857,25 +857,25 @@ async function fetchLiveStock(serviceCode) {
 }
 
 async function ensureUser(userId, from, env) {
-    if (!(await env.USERS_DB.get(\`usr:\${userId}\`))) {
-        await env.USERS_DB.put(\`usr:\${userId}\`, JSON.stringify({ name: from.first_name || "User", balance: 0.00 }));
+    if (!(await env.USERS_DB.get(`usr:${userId}`))) {
+        await env.USERS_DB.put(`usr:${userId}`, JSON.stringify({ name: from.first_name || "User", balance: 0.00 }));
     }
 }
 
 async function getUser(userId, env) {
-    const data = await env.USERS_DB.get(\`usr:\${userId}\`);
+    const data = await env.USERS_DB.get(`usr:${userId}`);
     return data ? JSON.parse(data) : { balance: 0.00 };
 }
 
 async function adjustBalance(userId, delta, env) {
     const user = await getUser(userId, env);
     user.balance = Math.max(0, parseFloat((user.balance + delta).toFixed(2)));
-    await env.USERS_DB.put(\`usr:\${userId}\`, JSON.stringify(user));
+    await env.USERS_DB.put(`usr:${userId}`, JSON.stringify(user));
     return user.balance;
 }
 
 async function sendTgMessage(chatId, text, reply_markup = null) {
     const body = { chat_id: chatId, text, parse_mode: "Markdown" };
     if (reply_markup) body.reply_markup = reply_markup;
-    await fetch(\`https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }

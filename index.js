@@ -258,7 +258,7 @@ const buildHTML = () => `
     </script>
 </body>
 </html>
-\`;
+`;
 
 // ==========================================
 // 2. BACKEND: CLOUDFLARE WORKER ROUTER
@@ -270,8 +270,8 @@ export default {
       
       // AUTO-WEBHOOK SETUP
       if (url.pathname === "/setup") {
-          const webhookUrl = `${url.origin}/`;
-          const setupApiUrl = `https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
+          const webhookUrl = url.origin + "/";
+          const setupApiUrl = "https://api.telegram.org/bot" + BOT_TOKEN + "/setWebhook?url=" + encodeURIComponent(webhookUrl);
           const resp = await fetch(setupApiUrl);
           const result = await resp.json();
           return new Response(JSON.stringify({ 
@@ -301,61 +301,64 @@ export default {
             if (body.action === 'buy') {
                 const user = await getUser(body.userId, env);
                 if (user.balance < parseFloat(body.price)) return new Response(JSON.stringify({ success: false, message: "Insufficient Balance!" }));
-                const res = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getNumber&service=${body.service}&country=${body.country}`);
+                const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getNumber&service=" + body.service + "&country=" + body.country);
                 const text = await res.text();
                 if (text.startsWith("ACCESS_NUMBER")) {
-                    const [, actId, phone] = text.split(":");
-                    await adjustBalance(body.userId, -parseFloat(body.price), env);
-                    const orderData = { actId, userId: body.userId, cost: parseFloat(body.price), phone, service: body.service, status: "WAITING", code: null };
-                    await env.USERS_DB.put(`act:${actId}`, JSON.stringify(orderData));
+                    const parts = text.split(":");
+                    const actId = parts[1];
+                    const phone = parts[2];
                     
-                    let userOrdersStr = await env.USERS_DB.get(`user_orders:${body.userId}`);
+                    await adjustBalance(body.userId, -parseFloat(body.price), env);
+                    const orderData = { actId: actId, userId: body.userId, cost: parseFloat(body.price), phone: phone, service: body.service, status: "WAITING", code: null };
+                    await env.USERS_DB.put("act:" + actId, JSON.stringify(orderData));
+                    
+                    let userOrdersStr = await env.USERS_DB.get("user_orders:" + body.userId);
                     let userOrders = userOrdersStr ? JSON.parse(userOrdersStr) : [];
                     userOrders.push(actId);
-                    await env.USERS_DB.put(`user_orders:${body.userId}`, JSON.stringify(userOrders));
-                    return new Response(JSON.stringify({ success: true, actId, phone }));
+                    await env.USERS_DB.put("user_orders:" + body.userId, JSON.stringify(userOrders));
+                    return new Response(JSON.stringify({ success: true, actId: actId, phone: phone }));
                 }
                 return new Response(JSON.stringify({ success: false, message: text }));
             }
             if (body.action === 'get_orders') {
-                let userOrdersStr = await env.USERS_DB.get(`user_orders:${body.userId}`);
+                let userOrdersStr = await env.USERS_DB.get("user_orders:" + body.userId);
                 let userOrderIds = userOrdersStr ? JSON.parse(userOrdersStr) : [];
                 let activeOrders = [];
                 for (let actId of userOrderIds) {
-                    let oStr = await env.USERS_DB.get(`act:${actId}`);
+                    let oStr = await env.USERS_DB.get("act:" + actId);
                     if (oStr) activeOrders.push(JSON.parse(oStr));
                 }
                 return new Response(JSON.stringify({ orders: activeOrders.reverse() }));
             }
             if (body.action === 'status') {
-                const res = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getStatus&id=${body.actId}`);
+                const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getStatus&id=" + body.actId);
                 const text = await res.text();
                 if (text.startsWith("STATUS_OK")) {
                     const code = text.split(":")[1];
-                    let oStr = await env.USERS_DB.get(`act:${body.actId}`);
+                    let oStr = await env.USERS_DB.get("act:" + body.actId);
                     if(oStr) {
                         let order = JSON.parse(oStr);
                         order.status = 'OK'; order.code = code;
-                        await env.USERS_DB.put(`act:${body.actId}`, JSON.stringify(order));
+                        await env.USERS_DB.put("act:" + body.actId, JSON.stringify(order));
                     }
-                    await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=setStatus&status=6&id=${body.actId}`);
-                    return new Response(JSON.stringify({ status: 'OK', code }));
+                    await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=setStatus&status=6&id=" + body.actId);
+                    return new Response(JSON.stringify({ status: 'OK', code: code }));
                 }
                 return new Response(JSON.stringify({ status: text }));
             }
             if (body.action === 'cancel') {
-                const orderStr = await env.USERS_DB.get(`act:${body.actId}`);
+                const orderStr = await env.USERS_DB.get("act:" + body.actId);
                 if (!orderStr) return new Response(JSON.stringify({ success: false, message: "Order not found" }));
                 const order = JSON.parse(orderStr);
-                const res = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=setStatus&status=8&id=${body.actId}`);
+                const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=setStatus&status=8&id=" + body.actId);
                 const text = await res.text();
                 if (text === "ACCESS_CANCEL" || text === "STATUS_CANCEL") {
                     await adjustBalance(body.userId, order.cost, env);
-                    await env.USERS_DB.delete(`act:${body.actId}`);
-                    let userOrdersStr = await env.USERS_DB.get(`user_orders:${body.userId}`);
+                    await env.USERS_DB.delete("act:" + body.actId);
+                    let userOrdersStr = await env.USERS_DB.get("user_orders:" + body.userId);
                     if (userOrdersStr) {
                         let userOrders = JSON.parse(userOrdersStr).filter(id => id !== body.actId);
-                        await env.USERS_DB.put(`user_orders:${body.userId}`, JSON.stringify(userOrders));
+                        await env.USERS_DB.put("user_orders:" + body.userId, JSON.stringify(userOrders));
                     }
                     return new Response(JSON.stringify({ success: true }));
                 }
@@ -373,7 +376,7 @@ export default {
 
             if (text.startsWith("/start")) {
                 const user = await getUser(userId, env);
-                const welcomeText = `👑 *Welcome to AlokOTP Pro Store*\n\n💰 *Wallet Balance:* \`$${user.balance.toFixed(2)}\`\n🆔 *Your ID:* \`${userId}\`\n\n⚡ Buy virtual SMS numbers for WhatsApp, Telegram & 2000+ services.`;
+                const welcomeText = "👑 *Welcome to AlokOTP Pro Store*\n\n💰 *Wallet Balance:* `$" + user.balance.toFixed(2) + "`\n🆔 *Your ID:* `" + userId + "`\n\n⚡ Buy virtual SMS numbers for WhatsApp, Telegram & 2000+ services.";
                 
                 const kb = { 
                     inline_keyboard: [
@@ -395,12 +398,12 @@ export default {
                     const parts = text.split(" ");
                     if (parts.length === 3) {
                         const newBal = await adjustBalance(parts[1], parseFloat(parts[2]), env);
-                        await sendTgMessage(chatId, `✅ Added \`$${parts[2]}\` to user \`${parts[1]}\`.\nNew Balance: \`$${newBal.toFixed(2)}\``);
+                        await sendTgMessage(chatId, "✅ Added `$" + parts[2] + "` to user `" + parts[1] + "`.\nNew Balance: `$" + newBal.toFixed(2) + "`");
                     }
                 } else if (text.startsWith("/setupi")) {
                     const upi = text.replace("/setupi", "").trim();
                     await env.USERS_DB.put("admin:upi", upi);
-                    await sendTgMessage(chatId, `✅ UPI updated to: \`${upi}\``);
+                    await sendTgMessage(chatId, "✅ UPI updated to: `" + upi + "`");
                 }
             }
         }
@@ -412,7 +415,7 @@ export default {
             
             if (cb.data === "deposit_info") {
                 const upi = await env.USERS_DB.get("admin:upi") || "Admin ne abhi UPI set nahi kiya hai.";
-                const depMsg = `💳 *Deposit Funds*\n\nApne wallet mein balance daalne ke liye is UPI par payment karein:\n\n🏦 *UPI ID:* \`${upi}\`\n\nPayment karne ke baad screenshot Admin ko bhejein 👇`;
+                const depMsg = "💳 *Deposit Funds*\n\nApne wallet mein balance daalne ke liye is UPI par payment karein:\n\n🏦 *UPI ID:* `" + upi + "`\n\nPayment karne ke baad screenshot Admin ko bhejein 👇";
                 await sendTgMessage(chatId, depMsg, { inline_keyboard: [[{ text: "💬 Send Screenshot to Admin", url: "https://t.me/AlokAdminSupport" }]] });
             }
 
@@ -420,14 +423,14 @@ export default {
                 const upi = await env.USERS_DB.get("admin:upi") || "Not Set";
                 let gBal = "Loading...";
                 try {
-                    const gBalRes = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getBalance`);
+                    const gBalRes = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getBalance");
                     gBal = await gBalRes.text();
                 } catch(e) {}
 
-                const txt = `🛡️ *Admin Control Dashboard*\n\n🐻 *Grizzly API Balance:* \`${gBal}\`\n🏦 *Current UPI:* \`${upi}\`\n📈 *Profit Margin:* \`${PROFIT_PERCENTAGE * 100}%\`\n\n*Admin Commands:*\n➕ Add Balance: \`/add <UserID> <Amount>\`\n🏦 Set UPI: \`/setupi <your_upi@bank>\``;
+                const txt = "🛡️ *Admin Control Dashboard*\n\n🐻 *Grizzly API Balance:* `" + gBal + "`\n🏦 *Current UPI:* `" + upi + "`\n📈 *Profit Margin:* `" + (PROFIT_PERCENTAGE * 100) + "%`\n\n*Admin Commands:*\n➕ Add Balance: `/add <UserID> <Amount>`\n🏦 Set UPI: `/setupi <your_upi@bank>`";
                 await sendTgMessage(chatId, txt);
             }
-            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, { method: "POST", body: JSON.stringify({ callback_query_id: cb.id }) });
+            await fetch("https://api.telegram.org/bot" + BOT_TOKEN + "/answerCallbackQuery", { method: "POST", body: JSON.stringify({ callback_query_id: cb.id }) });
         }
       } catch (err) {}
       return new Response("OK", { status: 200 });
@@ -440,7 +443,7 @@ export default {
 // ==========================================
 async function fetchLiveStock(serviceCode) {
     try {
-        const res = await fetch(`${GRIZZLY_BASE}?api_key=${GRIZZLY_API_KEY}&action=getPricesV3&service=${serviceCode}`);
+        const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getPricesV3&service=" + serviceCode);
         const data = await res.json();
         
         let availableStock = [];
@@ -451,7 +454,7 @@ async function fetchLiveStock(serviceCode) {
                 if (stock > 0) {
                     const baseCost = parseFloat(item.price || item.cost || 0.15);
                     const finalPrice = (baseCost * (1 + PROFIT_PERCENTAGE)).toFixed(2); // 3% margin added here
-                    availableStock.push({ id: cId, name: COUNTRY_MAP[cId]?.name || `Country ${cId}`, stock, price: finalPrice });
+                    availableStock.push({ id: cId, name: COUNTRY_MAP[cId]?.name || "Country " + cId, stock: stock, price: finalPrice });
                 }
             }
         }
@@ -461,25 +464,25 @@ async function fetchLiveStock(serviceCode) {
 }
 
 async function ensureUser(userId, from, env) {
-    if (!(await env.USERS_DB.get(`usr:${userId}`))) {
-        await env.USERS_DB.put(`usr:${userId}`, JSON.stringify({ name: from.first_name || "User", balance: 0.00 }));
+    if (!(await env.USERS_DB.get("usr:" + userId))) {
+        await env.USERS_DB.put("usr:" + userId, JSON.stringify({ name: from.first_name || "User", balance: 0.00 }));
     }
 }
 
 async function getUser(userId, env) {
-    const data = await env.USERS_DB.get(`usr:${userId}`);
+    const data = await env.USERS_DB.get("usr:" + userId);
     return data ? JSON.parse(data) : { balance: 0.00 };
 }
 
 async function adjustBalance(userId, delta, env) {
     const user = await getUser(userId, env);
     user.balance = Math.max(0, parseFloat((user.balance + delta).toFixed(2)));
-    await env.USERS_DB.put(`usr:${userId}`, JSON.stringify(user));
+    await env.USERS_DB.put("usr:" + userId, JSON.stringify(user));
     return user.balance;
 }
 
 async function sendTgMessage(chatId, text, reply_markup = null) {
-    const body = { chat_id: chatId, text, parse_mode: "Markdown" };
+    const body = { chat_id: chatId, text: text, parse_mode: "Markdown" };
     if (reply_markup) body.reply_markup = reply_markup;
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await fetch("https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }

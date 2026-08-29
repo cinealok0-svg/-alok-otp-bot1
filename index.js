@@ -1,6 +1,6 @@
 /**
- * AlokMail Pro - Ultimate 24/7 Engine + Protected Instagram Vault & Admin System
- * Multi-Domain Relay | Smart OTP Capture | Admin-Only Instagram Vault | Sub-Admin Manager
+ * AlokMail Pro - All-in-One Cloudflare Worker Engine
+ * Modules: Multi-Domain Temp Mail + Meta AI Creation Wizard & Vault + Instagram Vault + Admin Suite
  * Platform: Cloudflare Workers
  * Owner ID: 8452322818
  */
@@ -9,34 +9,27 @@ const BOT_TOKEN = "8759442095:AAGCsqImU2IssXIvPIs-2Mdc1vZcdw92UDI";
 const OWNER_ID = "8452322818";
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-// Dynamic Admin Storage (Owner is permanent)
+// Dynamic Admin Store
 const ADMIN_SET = new Set([OWNER_ID]);
 
-// Global In-Memory Data Stores
+// In-Memory Storage
 const USER_STATE = new Map();
-const INSTA_VAULT = {
-  fresh: [],
-  used: []
-};
+const INSTA_VAULT = { fresh: [], used: [] };
+const META_VAULT = { fresh: [], used: [] };
 
-// Authentic Identity Pool
-const NAME_POOL = [
-  'priya', 'sneha', 'pooja', 'ananya', 'riya', 'kavya', 'tanvi', 'shreya',
-  'divya', 'aditi', 'simran', 'megha', 'ishita', 'muskan', 'radhika', 'neha',
-  'kritika', 'anjali', 'bhavna', 'chahat', 'deepika', 'esha', 'falguni', 'gauri',
-  'hina', 'isha', 'jiya', 'kiran', 'lavanya', 'mahi', 'nandini', 'oviya',
-  'palak', 'qandeel', 'ritika', 'sanya', 'trisha', 'urvi', 'vidhi', 'yashika',
-  'alok', 'rahul', 'rohit', 'amit', 'vikas', 'arjun', 'varun', 'karan',
-  'sahil', 'manish', 'aakash', 'dev', 'ayush', 'yash', 'nikhil', 'harsh',
-  'aditya', 'bhavesh', 'chirag', 'dhruv', 'eshan', 'faisal', 'gaurav', 'himanshu',
-  'ishaan', 'jatin', 'kunal', 'lakshay', 'mohit', 'naveen', 'omkar', 'pranav',
-  'qasim', 'rajat', 'suraj', 'tanmay', 'utkarsh', 'vivek', 'wasim', 'zubin'
+// Identity & Name Pools
+const NAMES_FIRST = [
+  'Aakash', 'Rohit', 'Priya', 'Sneha', 'Vikas', 'Amit', 'Pooja', 'Arjun',
+  'Kunal', 'Simran', 'Rahul', 'Divya', 'Aditi', 'Megha', 'Karan', 'Sahil'
+];
+
+const NAMES_LAST = [
+  'Sharma', 'Verma', 'Kumar', 'Singh', 'Gupta', 'Patel', 'Yadav', 'Chauhan', 'Mishra', 'Mehta'
 ];
 
 const ADJECTIVE_POOL = [
   'swift', 'cool', 'smart', 'bold', 'shiny', 'quiet', 'brave', 'lucky',
-  'royal', 'urban', 'silent', 'rapid', 'prime', 'sunny', 'noble', 'crisp',
-  'vivid', 'chill', 'sharp', 'fresh', 'stellar', 'lively', 'breezy', 'golden'
+  'royal', 'urban', 'silent', 'rapid', 'prime', 'sunny', 'noble', 'crisp'
 ];
 
 const DOMAINS = [
@@ -53,7 +46,7 @@ const DOMAINS = [
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("⚡ AlokMail Pro Enterprise Security Engine is Running 24/7!", { status: 200 });
+      return new Response("⚡ AlokMail Pro Ultimate Cloudflare Engine is Live 24/7!", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -63,17 +56,24 @@ export default {
   }
 };
 
-// Helper: Check Admin Status
 function checkIsAdmin(userId) {
   return userId === OWNER_ID || ADMIN_SET.has(userId);
 }
 
-// Utilities
 function getRandomUser() {
   const adj = ADJECTIVE_POOL[Math.floor(Math.random() * ADJECTIVE_POOL.length)];
-  const name = NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)];
+  const name = NAMES_FIRST[Math.floor(Math.random() * NAMES_FIRST.length)].toLowerCase();
   const num = Math.floor(1000 + Math.random() * 9000);
-  return `${adj}${name.charAt(0).toUpperCase() + name.slice(1)}${num}`.toLowerCase();
+  return `${adj}${name}${num}`;
+}
+
+function generateStrongPassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  let pwd = "";
+  for (let i = 0; i < 10; i++) {
+    pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return pwd + "Aa1!";
 }
 
 function extractSmartOtp(text) {
@@ -105,7 +105,7 @@ function parseAccountLine(line) {
   return null;
 }
 
-// Mailbox Creation & Fetching
+// Mailbox Handlers
 async function createFastMailbox(domainChoice = null, customUser = null) {
   const user = customUser || getRandomUser();
   const domain = domainChoice || DOMAINS[Math.floor(Math.random() * DOMAINS.length)];
@@ -180,7 +180,7 @@ async function fetchFastDetail(type, user, domain, sid, id) {
   }
 }
 
-// Router
+// Telegram Router
 async function handleTelegramUpdate(update) {
   const msg = update.message;
   const cb = update.callback_query;
@@ -201,15 +201,13 @@ async function handleTelegramUpdate(update) {
     }).catch(() => {});
   }
 
-  let session = USER_STATE.get(userId) || { history: [], mode: null };
+  let session = USER_STATE.get(userId) || { history: [], mode: null, metaWizard: null };
   const isAdmin = checkIsAdmin(userId);
   const isOwner = userId === OWNER_ID;
 
-  // 1. File Upload (Bulk Accounts Saver - ADMIN ONLY)
+  // File Upload
   if (document) {
-    if (!isAdmin) {
-      return send(chatId, "⛔ <b>Access Restricted:</b> Only designated Admins can upload account lists to the vault.");
-    }
+    if (!isAdmin) return send(chatId, "⛔ <b>Admin Access Only.</b>");
 
     try {
       const fileRes = await fetch(`${TELEGRAM_API}/getFile?file_id=${document.file_id}`);
@@ -219,47 +217,50 @@ async function handleTelegramUpdate(update) {
       const fileContent = await downloadRes.text();
 
       const lines = fileContent.split(/\r?\n/);
-      const accounts = [];
-      for (const line of lines) {
-        const acc = parseAccountLine(line);
-        if (acc) accounts.push(acc);
-      }
+      const accounts = lines.map(parseAccountLine).filter(Boolean);
 
       if (accounts.length > 0) {
-        INSTA_VAULT.fresh = [...accounts, ...INSTA_VAULT.fresh];
-
-        return send(chatId, `📂 <b>FILE PROCESSED SUCCESSFULLY!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n• <b>Imported:</b> <code>${accounts.length}</code> Accounts\n• <b>Total Fresh Queue:</b> <code>${INSTA_VAULT.fresh.length}</code> Accounts\n\n👇 <i>Choose an action below:</i>`, {
-          inline_keyboard: [
-            [{ text: "⚡ Get 1 Fresh Insta ID", callback_data: "insta_get" }],
-            [{ text: "📸 Go to Vault Hub", callback_data: "insta_vault" }],
-            [{ text: "🏠 Return to Home", callback_data: "home" }]
-          ]
-        });
+        if (session.mode === 'upload_meta') {
+          META_VAULT.fresh = [...accounts, ...META_VAULT.fresh];
+          return send(chatId, `🤖 <b>META ACCOUNTS LOADED!</b>\nAdded: <code>${accounts.length}</code>\nTotal Fresh: <code>${META_VAULT.fresh.length}</code>`, {
+            inline_keyboard: [[{ text: "🤖 Meta AI Hub", callback_data: "meta_hub" }]]
+          });
+        } else {
+          INSTA_VAULT.fresh = [...accounts, ...INSTA_VAULT.fresh];
+          return send(chatId, `📸 <b>INSTAGRAM ACCOUNTS LOADED!</b>\nAdded: <code>${accounts.length}</code>\nTotal Fresh: <code>${INSTA_VAULT.fresh.length}</code>`, {
+            inline_keyboard: [[{ text: "📸 Insta Vault", callback_data: "insta_vault" }]]
+          });
+        }
       } else {
-        return send(chatId, "❌ <b>Format Error:</b> No accounts identified. Ensure format is <code>username:password</code> or <code>username|password</code>.");
+        return send(chatId, "❌ <i>No valid accounts found in file.</i>");
       }
     } catch (e) {
-      return send(chatId, `❌ <b>File Error:</b> ${e.message}`);
+      return send(chatId, `❌ <i>File error: ${e.message}</i>`);
     }
   }
 
-  // 2. Interactive Input Handlers (Add Admin / Save Text IDs)
+  // Text Inputs
   if (text && session.mode === 'awaiting_add_admin' && isOwner) {
     session.mode = null;
     USER_STATE.set(userId, session);
-
     const targetId = text.replace(/[^0-9]/g, '');
-    if (targetId && targetId.length > 5) {
+    if (targetId.length > 5) {
       ADMIN_SET.add(targetId);
-      return send(chatId, `✅ <b>ADMIN PROMOTED!</b>\n━━━━━━━━━━━━━━━━━━━━━━\nUser ID <code>${targetId}</code> is now an authorized Sub-Admin.`, {
-        inline_keyboard: [
-          [{ text: "👑 Admin Control Panel", callback_data: "admin_panel" }],
-          [{ text: "🏠 Return to Home", callback_data: "home" }]
-        ]
+      return send(chatId, `✅ <b>Sub-Admin Promoted:</b> <code>${targetId}</code>`, {
+        inline_keyboard: [[{ text: "👑 Admin Panel", callback_data: "admin_panel" }]]
       });
-    } else {
-      return send(chatId, "❌ <i>Invalid Telegram User ID format. Please send numeric user ID.</i>", {
-        inline_keyboard: [[{ text: "👑 Back to Panel", callback_data: "admin_panel" }]]
+    }
+  }
+
+  if (text && session.mode === 'awaiting_meta_save' && isAdmin) {
+    session.mode = null;
+    USER_STATE.set(userId, session);
+    const lines = text.split(/\r?\n/);
+    const added = lines.map(parseAccountLine).filter(Boolean);
+    if (added.length > 0) {
+      META_VAULT.fresh = [...added, ...META_VAULT.fresh];
+      return send(chatId, `✅ <b>Saved ${added.length} Meta Accounts!</b>`, {
+        inline_keyboard: [[{ text: "🤖 Meta AI Hub", callback_data: "meta_hub" }]]
       });
     }
   }
@@ -267,105 +268,47 @@ async function handleTelegramUpdate(update) {
   if (text && session.mode === 'awaiting_insta_save' && isAdmin) {
     session.mode = null;
     USER_STATE.set(userId, session);
-
     const lines = text.split(/\r?\n/);
-    const added = [];
-    for (const l of lines) {
-      const acc = parseAccountLine(l);
-      if (acc) added.push(acc);
-    }
-
+    const added = lines.map(parseAccountLine).filter(Boolean);
     if (added.length > 0) {
       INSTA_VAULT.fresh = [...added, ...INSTA_VAULT.fresh];
-
-      return send(chatId, `✅ <b>SAVED ${added.length} ACCOUNT(S) TO VAULT!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n• <b>Total Fresh IDs:</b> <code>${INSTA_VAULT.fresh.length}</code>\n\n👇 <i>Quick Actions:</i>`, {
-        inline_keyboard: [
-          [{ text: "⚡ Get 1 Fresh Insta ID", callback_data: "insta_get" }],
-          [{ text: "📸 Vault Management", callback_data: "insta_vault" }],
-          [{ text: "🏠 Return to Home", callback_data: "home" }]
-        ]
-      });
-    } else {
-      return send(chatId, "❌ <i>Format not recognized. Use: <code>username:password</code> or <code>username|password</code></i>", {
-        inline_keyboard: [[{ text: "📸 Back to Vault", callback_data: "insta_vault" }]]
+      return send(chatId, `✅ <b>Saved ${added.length} Insta Accounts!</b>`, {
+        inline_keyboard: [[{ text: "📸 Insta Vault", callback_data: "insta_vault" }]]
       });
     }
   }
 
-  // Quick Command Admin Add: /addadmin 12345678
-  if (text && text.startsWith("/addadmin")) {
-    if (!isOwner) return send(chatId, "❌ <i>Unauthorized. Owner Only.</i>");
-    const parts = text.split(" ");
-    const newAdmin = parts[1]?.trim();
-    if (newAdmin) {
-      ADMIN_SET.add(newAdmin);
-      return send(chatId, `✅ <b>User <code>${newAdmin}</code> added to Sub-Admins list!</b>`);
-    } else {
-      return send(chatId, "💡 <i>Usage:</i> <code>/addadmin &lt;telegram_user_id&gt;</code>");
-    }
-  }
-
-  // Custom Alias Setup
-  if (text && text.startsWith("/set")) {
-    const parts = text.split(" ");
-    const userAlias = parts[1] || getRandomUser();
-    const domainAlias = parts[2] || DOMAINS[0];
-
-    const mb = await createFastMailbox(domainAlias, userAlias);
-    session.active = mb;
-    session.history = [mb.email, ...(session.history || []).filter(e => e !== mb.email)].slice(0, 5);
-    USER_STATE.set(userId, session);
-
-    const out = 
-      `📬 <b>CUSTOM ALIAS READY</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `📧 <b>Email:</b> <code>${mb.email}</code>\n` +
-      `<i>(Tap above to copy)</i>\n\n` +
-      `📡 <b>Relay:</b> <code>Direct Edge Bridge</code>\n` +
-      `⏳ <b>Status:</b> 🟢 <i>Listening for OTPs...</i>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━`;
-
-    const token = `${mb.type}_${mb.user}_${mb.domain}_${mb.sid}`;
-    const kb = {
-      inline_keyboard: [
-        [{ text: "📩 Fetch OTP / Check Inbox", callback_data: `chk_${token}` }],
-        [
-          { text: "🔄 Refresh", callback_data: `chk_${token}` },
-          { text: "⚡ New Mail", callback_data: "gen" }
-        ],
-        [
-          { text: "📷 Get QR Code", callback_data: `qr_${mb.email}` },
-          { text: "🌐 Switch Domain", callback_data: "domains" }
-        ]
-      ]
-    };
-    return send(chatId, out, kb);
-  }
-
-  // 3. Home Screen (Dynamic UI based on Admin Status)
+  // Main Home Menu
   if (text === "/start" || data === "home") {
     session.mode = null;
     USER_STATE.set(userId, session);
 
     let welcome = 
-      `🛡️ <b>ALOKMAIL PRO — ENTERPRISE INBOX & VAULT</b>\n` +
+      `🛡️ <b>ALOKMAIL PRO — COMPLETE CONTROL CENTER</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `High-speed disposable email generator with instant verification OTP auto-detection.\n\n`;
+      `• <b>Temp Mail:</b> Free disposable mail generator & auto OTP fetcher.\n` +
+      `• <b>Meta AI Wizard:</b> Live Account creation assistant with instant email swap.\n\n`;
 
     if (isAdmin) {
-      welcome += `👑 <b>Admin Mode Active</b>\n• <b>Vault Fresh IDs:</b> <code>${INSTA_VAULT.fresh.length}</code>\n• <b>Vault Used IDs:</b> <code>${INSTA_VAULT.used.length}</code>\n\n`;
+      welcome += 
+        `👑 <b>Admin Storage Status:</b>\n` +
+        `• 🤖 Meta Vault: <code>${META_VAULT.fresh.length}</code> Fresh IDs\n` +
+        `• 📸 Insta Vault: <code>${INSTA_VAULT.fresh.length}</code> Fresh IDs\n\n`;
     }
 
-    welcome += `👇 <i>Select an action below:</i>`;
+    welcome += `👇 <i>Select an option from the menu below:</i>`;
 
     const rows = [
-      [{ text: "⚡ Generate Fresh Temp Mail", callback_data: "gen" }]
+      [{ text: "⚡ Generate Free Temp Mail", callback_data: "gen" }]
     ];
 
     if (isAdmin) {
       rows.push([
-        { text: "📸 Insta Vault (Admin)", callback_data: "insta_vault" },
-        { text: "👑 Admin Panel", callback_data: "admin_panel" }
+        { text: "🤖 Meta AI Hub", callback_data: "meta_hub" },
+        { text: "📸 Instagram Vault", callback_data: "insta_vault" }
+      ]);
+      rows.push([
+        { text: "👑 Admin Control Panel", callback_data: "admin_panel" }
       ]);
     }
 
@@ -375,207 +318,320 @@ async function handleTelegramUpdate(update) {
     ]);
 
     rows.push([
-      { text: "📖 User Guide", callback_data: "help" },
-      { text: "🛡️ Server Status", callback_data: "status" }
+      { text: "📖 Help & Guide", callback_data: "help" },
+      { text: "🛡️ Server Telemetry", callback_data: "status" }
     ]);
 
     const kb = { inline_keyboard: rows };
     return messageId ? edit(chatId, messageId, welcome, kb) : send(chatId, welcome, kb);
   }
 
-  // 4. Instagram ID Vault Hub (ADMIN ONLY)
-  if (data === "insta_vault") {
-    if (!isAdmin) {
-      return send(chatId, "⛔ <b>Restricted:</b> Instagram Vault is exclusively for Administrators.");
-    }
-
+  // Meta AI Hub
+  if (data === "meta_hub") {
+    if (!isAdmin) return send(chatId, "⛔ Admin Only.");
     session.mode = null;
     USER_STATE.set(userId, session);
 
+    const mText = 
+      `🤖 <b>META AI (meta.ai) CREATION & VAULT HUB</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• <b>Fresh IDs in Queue:</b> <code>${META_VAULT.fresh.length}</code>\n` +
+      `• <b>Archived / Used IDs:</b> <code>${META_VAULT.used.length}</code>\n\n` +
+      `🚀 <i>Use the Wizard below to get fresh credentials, fetch OTPs in seconds, and swap emails instantly if needed.</i>`;
+
+    const kb = {
+      inline_keyboard: [
+        [{ text: "⚡ Launch Meta AI Account Creator", callback_data: "meta_wizard_start" }],
+        [{ text: "📦 Get 1 Fresh Saved Meta ID", callback_data: "meta_get" }],
+        [
+          { text: "💾 Save Accounts (Text)", callback_data: "meta_add_text" },
+          { text: "📂 Upload CSV/TXT File", callback_data: "meta_add_file" }
+        ],
+        [
+          { text: "📁 Export Used Meta IDs", callback_data: "meta_export" },
+          { text: "🏠 Return to Home Menu", callback_data: "home" }
+        ]
+      ]
+    };
+    return edit(chatId, messageId, mText, kb);
+  }
+
+  // Meta AI Live Creator Wizard (Interactive Step-by-Step with 1-Click Email Swap)
+  if (data === "meta_wizard_start" || data === "meta_wizard_swap") {
+    if (!isAdmin) return;
+
+    // Create fresh mailbox for Meta
+    const mb = await createFastMailbox();
+    const firstName = NAMES_FIRST[Math.floor(Math.random() * NAMES_FIRST.length)];
+    const lastName = NAMES_LAST[Math.floor(Math.random() * NAMES_LAST.length)];
+    const password = generateStrongPassword();
+    const dobYear = Math.floor(1994 + Math.random() * 7); // 1994 - 2000 (Safe 18+)
+
+    session.metaWizard = {
+      mb,
+      name: `${firstName} ${lastName}`,
+      password,
+      dob: `15 / 06 / ${dobYear}`,
+      email: mb.email
+    };
+    USER_STATE.set(userId, session);
+
+    const token = `${mb.type}_${mb.user}_${mb.domain}_${mb.sid}`;
+
+    const wizardCard = 
+      `🤖 <b>META AI ACCOUNT CREATOR WIZARD</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `👤 <b>Name:</b> <code>${session.metaWizard.name}</code>\n` +
+      `🎂 <b>DOB (18+ Safe):</b> <code>${session.metaWizard.dob}</code>\n` +
+      `📧 <b>Email:</b> <i>(Tap to copy)</i>\n<code>${mb.email}</code>\n` +
+      `🔑 <b>Password:</b> <code>${password}</code>\n\n` +
+      `📝 <b>Workflow Instructions:</b>\n` +
+      `1️⃣ Copy the Email & Password above into <b>meta.ai</b>.\n` +
+      `2️⃣ Tap <b>'📩 Check Meta OTP'</b> below to get the code.\n` +
+      `3️⃣ <i>Agar 10s me OTP na aaye, turant '🔄 Swap Email' dabayein!</i>\n` +
+      `4️⃣ Account banne ke baad <b>'💾 Save Account to Vault'</b> dabayein.`;
+
+    const kb = {
+      inline_keyboard: [
+        [{ text: "📩 Check Meta OTP", callback_data: `meta_wizard_chk_${token}` }],
+        [
+          { text: "🔄 OTP Nahi Aaya? Swap Email", callback_data: "meta_wizard_swap" },
+          { text: "💾 Save to Vault", callback_data: "meta_wizard_save" }
+        ],
+        [{ text: "⚡ Next Fresh Account", callback_data: "meta_wizard_start" }],
+        [{ text: "⬅️ Back to Meta Hub", callback_data: "meta_hub" }]
+      ]
+    };
+    return edit(chatId, messageId, wizardCard, kb);
+  }
+
+  // Meta Wizard OTP Checker
+  if (data && data.startsWith("meta_wizard_chk_")) {
+    const [, type, user, domain, sid] = data.split("_");
+    const activeEmail = `${user}@${domain}`;
+    const token = `${type}_${user}_${domain}_${sid}`;
+
+    const list = await fetchFastMessages(type, user, domain, sid);
+
+    if (!list || list.length === 0) {
+      return edit(chatId, messageId, `⏳ <b>WAITING FOR META OTP...</b>\n\n📧 <code>${activeEmail}</code>\n\n<i>No code received yet. If it takes more than 10 seconds, tap Swap Email below to retry with a fresh ID!</i>`, {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh Inbox Now", callback_data: `meta_wizard_chk_${token}` }],
+          [{ text: "🔄 OTP Nahi Aaya? Swap Email", callback_data: "meta_wizard_swap" }],
+          [{ text: "⬅️ Back to Wizard", callback_data: "meta_wizard_start" }]
+        ]
+      });
+    }
+
+    let report = `✅ <b>META OTP RECEIVED!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${activeEmail}</code>\n\n`;
+    let detectedOtp = null;
+
+    for (let i = 0; i < Math.min(list.length, 2); i++) {
+      const m = list[i];
+      const mailDetails = await fetchFastDetail(type, user, domain, sid, m.id);
+      const fullText = (mailDetails.subject || "") + " " + (mailDetails.body || "");
+      const otp = extractSmartOtp(fullText);
+      if (otp && !detectedOtp) detectedOtp = otp;
+
+      report += `👤 <b>From:</b> <code>${escapeHtml(mailDetails.from)}</code>\n`;
+      report += `📝 <b>Subject:</b> <i>${escapeHtml(mailDetails.subject)}</i>\n`;
+      if (otp) {
+        report += `🔑 <b>META VERIFICATION CODE:</b> <code>${otp}</code>\n`;
+      }
+      report += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    }
+
+    const kbRows = [];
+    if (detectedOtp) {
+      kbRows.push([{ text: `📋 Copy OTP: ${detectedOtp}`, callback_data: "dummy" }]);
+    }
+    kbRows.push([
+      { text: "💾 Save Account to Vault", callback_data: "meta_wizard_save" },
+      { text: "⚡ Next Fresh Account", callback_data: "meta_wizard_start" }
+    ]);
+    kbRows.push([{ text: "🤖 Meta Hub", callback_data: "meta_hub" }]);
+
+    return edit(chatId, messageId, report, { inline_keyboard: kbRows });
+  }
+
+  // Save current wizard account directly to Meta Vault
+  if (data === "meta_wizard_save") {
+    if (!session.metaWizard) {
+      return edit(chatId, messageId, "⚠️ <i>No active account wizard session found.</i>", {
+        inline_keyboard: [[{ text: "🤖 Meta Hub", callback_data: "meta_hub" }]]
+      });
+    }
+
+    const acc = {
+      username: session.metaWizard.email,
+      password: session.metaWizard.password,
+      extra: session.metaWizard.name,
+      raw: `${session.metaWizard.email}|${session.metaWizard.password}|${session.metaWizard.name}`
+    };
+
+    META_VAULT.fresh.unshift(acc);
+    session.metaWizard = null;
+    USER_STATE.set(userId, session);
+
+    return edit(chatId, messageId, `✅ <b>ACCOUNT SAVED TO META VAULT!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${acc.username}</code>\n🔑 <code>${acc.password}</code>\n\n📦 <b>Total Fresh Stock in Vault:</b> <code>${META_VAULT.fresh.length}</code>`, {
+      inline_keyboard: [
+        [{ text: "⚡ Create Another Meta Account", callback_data: "meta_wizard_start" }],
+        [{ text: "🤖 Meta Hub", callback_data: "meta_hub" }]
+      ]
+    });
+  }
+
+  // Fetch 1 Saved Meta Account
+  if (data === "meta_get") {
+    if (!isAdmin) return;
+    if (META_VAULT.fresh.length === 0) {
+      return edit(chatId, messageId, `⚠️ <b>Meta Vault is Empty!</b>\nUse the creator wizard or upload accounts first.`, {
+        inline_keyboard: [
+          [{ text: "⚡ Launch Creator Wizard", callback_data: "meta_wizard_start" }],
+          [{ text: "⬅️ Back to Meta Hub", callback_data: "meta_hub" }]
+        ]
+      });
+    }
+
+    const acc = META_VAULT.fresh.shift();
+    META_VAULT.used.unshift(acc);
+
+    const card = 
+      `🤖 <b>FRESH META AI ACCOUNT</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `👤 <b>Email / Username:</b>\n<code>${acc.username}</code>\n\n` +
+      `🔑 <b>Password:</b>\n<code>${acc.password}</code>\n\n` +
+      (acc.extra ? `ℹ️ <b>Info:</b> <code>${acc.extra}</code>\n\n` : '') +
+      `📦 <i>Account moved to archive. Remaining in Vault: ${META_VAULT.fresh.length}</i>`;
+
+    return edit(chatId, messageId, card, {
+      inline_keyboard: [
+        [{ text: "⚡ Get Next Meta ID", callback_data: "meta_get" }],
+        [{ text: "🤖 Meta Hub", callback_data: "meta_hub" }],
+        [{ text: "🏠 Main Menu", callback_data: "home" }]
+      ]
+    });
+  }
+
+  if (data === "meta_add_text") {
+    if (!isAdmin) return;
+    session.mode = 'awaiting_meta_save';
+    USER_STATE.set(userId, session);
+    return edit(chatId, messageId, `💾 <b>Send Meta credentials now:</b>\n<code>email:password</code> or <code>email|password</code>`, {
+      inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "meta_hub" }]]
+    });
+  }
+
+  if (data === "meta_add_file") {
+    if (!isAdmin) return;
+    session.mode = 'upload_meta';
+    USER_STATE.set(userId, session);
+    return edit(chatId, messageId, `📂 <b>Upload your .txt/.csv file for Meta Vault.</b>`, {
+      inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "meta_hub" }]]
+    });
+  }
+
+  if (data === "meta_export") {
+    if (!isAdmin) return;
+    const list = META_VAULT.used.map(a => a.raw).join("\n") || "No used accounts.";
+    return sendDocument(chatId, list, "used_meta_accounts.txt", `📦 Used Meta Accounts Archive (${META_VAULT.used.length})`);
+  }
+
+  // Instagram Vault Hub
+  if (data === "insta_vault") {
+    if (!isAdmin) return send(chatId, "⛔ Admin Only.");
     const vText = 
       `📸 <b>INSTAGRAM VAULT CONTROL HUB</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `• <b>Fresh IDs in Queue:</b> <code>${INSTA_VAULT.fresh.length}</code>\n` +
-      `• <b>Archived / Used IDs:</b> <code>${INSTA_VAULT.used.length}</code>\n\n` +
-      `🔒 <i>Accounts delivered here are isolated and never exposed to general public users.</i>\n\n` +
-      `👇 <i>Select vault operation:</i>`;
+      `• <b>Fresh IDs in Stock:</b> <code>${INSTA_VAULT.fresh.length}</code>\n` +
+      `• <b>Used / Archived:</b> <code>${INSTA_VAULT.used.length}</code>`;
 
     const kb = {
       inline_keyboard: [
         [{ text: "⚡ Get 1 Fresh Insta ID", callback_data: "insta_get" }],
         [
-          { text: "💾 Save / Add IDs (Text)", callback_data: "insta_add" },
-          { text: "📂 Upload CSV / TXT File", callback_data: "insta_upload_guide" }
+          { text: "💾 Save IDs (Text)", callback_data: "insta_add" },
+          { text: "📁 Export Used IDs", callback_data: "insta_export" }
         ],
-        [
-          { text: "📁 Export Used Accounts", callback_data: "insta_export" },
-          { text: "🏠 Return to Home", callback_data: "home" }
-        ]
+        [{ text: "🏠 Return to Home Menu", callback_data: "home" }]
       ]
     };
     return edit(chatId, messageId, vText, kb);
   }
 
-  // Instagram File Upload Guide
-  if (data === "insta_upload_guide") {
-    if (!isAdmin) return;
-    const uText = 
-      `📂 <b>BULK UPLOAD INSTAGRAM ACCOUNTS</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Simply send your <code>.txt</code> or <code>.csv</code> file in this chat right now.\n\n` +
-      `📝 <b>Supported Line Formats:</b>\n` +
-      `• <code>username:password</code>\n` +
-      `• <code>username|password</code>\n` +
-      `• <code>email:username:password</code>\n\n` +
-      `• <b>Current Vault Queue:</b> <code>${INSTA_VAULT.fresh.length}</code> fresh accounts.`;
-
-    const kb = {
-      inline_keyboard: [[{ text: "⬅️ Back to Vault", callback_data: "insta_vault" }]]
-    };
-    return edit(chatId, messageId, uText, kb);
-  }
-
-  // Save Text Prompt
-  if (data === "insta_add") {
-    if (!isAdmin) return;
-    session.mode = 'awaiting_insta_save';
-    USER_STATE.set(userId, session);
-
-    const addText = 
-      `💾 <b>MANUAL ACCOUNTS REGISTRATION</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Send your Instagram credentials in the chat now.\n\n` +
-      `📝 <b>Format:</b>\n` +
-      `<code>username:password</code>\n` +
-      `<code>username|password</code>\n\n` +
-      `<i>(You can paste multiple lines at once!)</i>`;
-
-    const kb = {
-      inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "insta_vault" }]]
-    };
-    return edit(chatId, messageId, addText, kb);
-  }
-
-  // Fetch 1 Fresh Instagram Account (ADMIN ONLY)
   if (data === "insta_get") {
     if (!isAdmin) return;
-
     if (INSTA_VAULT.fresh.length === 0) {
-      return edit(chatId, messageId, `⚠️ <b>VAULT IS EMPTY!</b>\n\nNo fresh accounts remaining. Add more accounts via text or file upload.`, {
-        inline_keyboard: [
-          [{ text: "💾 Save / Add IDs", callback_data: "insta_add" }],
-          [{ text: "⬅️ Back to Vault", callback_data: "insta_vault" }]
-        ]
+      return edit(chatId, messageId, `⚠️ <b>Insta Vault is Empty!</b>`, {
+        inline_keyboard: [[{ text: "📸 Back to Vault", callback_data: "insta_vault" }]]
       });
     }
-
     const acc = INSTA_VAULT.fresh.shift();
     INSTA_VAULT.used.unshift(acc);
 
     const card = 
       `📸 <b>FRESH INSTAGRAM ACCOUNT</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `👤 <b>Username:</b> <i>(Tap to copy)</i>\n<code>${acc.username}</code>\n\n` +
-      `🔑 <b>Password:</b> <i>(Tap to copy)</i>\n<code>${acc.password}</code>\n\n` +
-      (acc.extra ? `ℹ️ <b>Extra Info:</b> <code>${acc.extra}</code>\n\n` : '') +
-      `📦 <i>Account moved to archive to prevent duplicate distribution.\nRemaining in Vault: ${INSTA_VAULT.fresh.length}</i>`;
+      `👤 <b>Username:</b> <code>${acc.username}</code>\n` +
+      `🔑 <b>Password:</b> <code>${acc.password}</code>\n\n` +
+      `📦 <i>Remaining in Vault: ${INSTA_VAULT.fresh.length}</i>`;
 
-    const kb = {
+    return edit(chatId, messageId, card, {
       inline_keyboard: [
-        [{ text: "⚡ Get Next Fresh ID", callback_data: "insta_get" }],
-        [
-          { text: "💾 Add More IDs", callback_data: "insta_add" },
-          { text: "📸 Vault Hub", callback_data: "insta_vault" }
-        ],
+        [{ text: "⚡ Get Next Insta ID", callback_data: "insta_get" }],
+        [{ text: "📸 Vault Hub", callback_data: "insta_vault" }],
         [{ text: "🏠 Main Menu", callback_data: "home" }]
       ]
-    };
-    return edit(chatId, messageId, card, kb);
-  }
-
-  // Export Used Accounts Backup (ADMIN ONLY)
-  if (data === "insta_export") {
-    if (!isAdmin) return;
-    const list = INSTA_VAULT.used.map(a => a.raw).join("\n") || "No used accounts in archive.";
-    return sendDocument(chatId, list, "used_instagram_accounts.txt", `📦 <b>Used Accounts Archive Export</b>\nTotal: ${INSTA_VAULT.used.length}`);
-  }
-
-  // 5. Admin Control Panel (Owner & Sub-Admins)
-  if (text === "/admin" || data === "admin_panel") {
-    if (!isAdmin) {
-      return send(chatId, "❌ <i>Access Denied. Owner & Authorized Admins Only.</i>");
-    }
-
-    session.mode = null;
-    USER_STATE.set(userId, session);
-
-    const adminListStr = Array.from(ADMIN_SET).map(id => `• <code>${id}</code> ${id === OWNER_ID ? '(Owner 👑)' : '(Sub-Admin 🛡️)'}`).join("\n");
-
-    const aText = 
-      `👑 <b>ENTERPRISE ADMIN MANAGEMENT</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `• <b>Your ID:</b> <code>${userId}</code>\n` +
-      `• <b>Role:</b> ${isOwner ? '👑 Super Owner' : '🛡️ Authorized Sub-Admin'}\n` +
-      `• <b>Active Vault Stock:</b> <code>${INSTA_VAULT.fresh.length}</code> Accounts\n` +
-      `• <b>Archived Stock:</b> <code>${INSTA_VAULT.used.length}</code> Accounts\n\n` +
-      `👥 <b>Authorized Admins List:</b>\n${adminListStr}\n\n` +
-      `👇 <i>Administrative Actions:</i>`;
-
-    const rows = [
-      [{ text: "📸 Manage Instagram Vault", callback_data: "insta_vault" }]
-    ];
-
-    if (isOwner) {
-      rows.push([
-        { text: "➕ Add Sub-Admin", callback_data: "admin_add_prompt" },
-        { text: "📁 Export Fresh IDs", callback_data: "admin_export_fresh" }
-      ]);
-      rows.push([
-        { text: "🗑️ Clear Fresh Vault", callback_data: "admin_clear_fresh" }
-      ]);
-    }
-
-    rows.push([{ text: "🏠 Return to Home Menu", callback_data: "home" }]);
-
-    const kb = { inline_keyboard: rows };
-    return messageId ? edit(chatId, messageId, aText, kb) : send(chatId, aText, kb);
-  }
-
-  // Add Sub-Admin Prompt (OWNER ONLY)
-  if (data === "admin_add_prompt") {
-    if (!isOwner) return send(chatId, "❌ <i>Only the Super Owner can add Sub-Admins.</i>");
-    session.mode = 'awaiting_add_admin';
-    USER_STATE.set(userId, session);
-
-    const promptText = 
-      `➕ <b>ADD NEW SUB-ADMIN</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Send the <b>Telegram User ID</b> of the user you want to authorize as Sub-Admin.\n\n` +
-      `<i>They will get full access to the Instagram Vault and admin tools.</i>`;
-
-    const kb = {
-      inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "admin_panel" }]]
-    };
-    return edit(chatId, messageId, promptText, kb);
-  }
-
-  // Admin Export Fresh Stock (OWNER ONLY)
-  if (data === "admin_export_fresh") {
-    if (!isOwner) return;
-    const list = INSTA_VAULT.fresh.map(a => a.raw).join("\n") || "No fresh accounts available.";
-    return sendDocument(chatId, list, "fresh_vault_stock.txt", `📁 <b>Fresh Vault Accounts Backup</b>\nTotal: ${INSTA_VAULT.fresh.length}`);
-  }
-
-  // Admin Clear Fresh Vault (OWNER ONLY)
-  if (data === "admin_clear_fresh") {
-    if (!isOwner) return;
-    INSTA_VAULT.fresh = [];
-    return edit(chatId, messageId, "🗑️ <b>Fresh accounts vault has been wiped clean.</b>", {
-      inline_keyboard: [[{ text: "👑 Back to Admin Panel", callback_data: "admin_panel" }]]
     });
   }
 
-  // 6. Generate Temp Mailbox
+  if (data === "insta_add") {
+    if (!isAdmin) return;
+    session.mode = 'awaiting_insta_save';
+    USER_STATE.set(userId, session);
+    return edit(chatId, messageId, `💾 <b>Send Instagram credentials now:</b>\n<code>username:password</code>`, {
+      inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "insta_vault" }]]
+    });
+  }
+
+  if (data === "insta_export") {
+    if (!isAdmin) return;
+    const list = INSTA_VAULT.used.map(a => a.raw).join("\n") || "No used accounts.";
+    return sendDocument(chatId, list, "used_insta_accounts.txt", `📦 Used Insta Accounts (${INSTA_VAULT.used.length})`);
+  }
+
+  // Admin Control Panel
+  if (text === "/admin" || data === "admin_panel") {
+    if (!isAdmin) return send(chatId, "❌ Unauthorized.");
+    const adminListStr = Array.from(ADMIN_SET).map(id => `• <code>${id}</code> ${id === OWNER_ID ? '(Owner)' : '(Sub-Admin)'}`).join("\n");
+    const aText = 
+      `👑 <b>ADMIN ENTERPRISE DASHBOARD</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• <b>Owner:</b> <code>${OWNER_ID}</code>\n` +
+      `• <b>Meta Vault Stock:</b> <code>${META_VAULT.fresh.length}</code> Accounts\n` +
+      `• <b>Insta Vault Stock:</b> <code>${INSTA_VAULT.fresh.length}</code> Accounts\n\n` +
+      `👥 <b>Admins List:</b>\n${adminListStr}`;
+
+    const rows = [
+      [{ text: "🤖 Meta AI Hub", callback_data: "meta_hub" }, { text: "📸 Insta Vault", callback_data: "insta_vault" }]
+    ];
+    if (isOwner) {
+      rows.push([{ text: "➕ Add Sub-Admin", callback_data: "admin_add_prompt" }]);
+    }
+    rows.push([{ text: "🏠 Return to Home Menu", callback_data: "home" }]);
+
+    return messageId ? edit(chatId, messageId, aText, { inline_keyboard: rows }) : send(chatId, aText, { inline_keyboard: rows });
+  }
+
+  if (data === "admin_add_prompt" && isOwner) {
+    session.mode = 'awaiting_add_admin';
+    USER_STATE.set(userId, session);
+    return edit(chatId, messageId, `➕ <b>Send Telegram User ID to authorize as Sub-Admin:</b>`, {
+      inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "admin_panel" }]]
+    });
+  }
+
+  // Temp Mailbox Generation
   if (data === "gen" || (data && data.startsWith("dgen_"))) {
     const domainChoice = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
     const mb = await createFastMailbox(domainChoice);
@@ -589,12 +645,11 @@ async function handleTelegramUpdate(update) {
       `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `📧 <b>Email Address:</b> <i>(Tap to copy)</i>\n` +
       `<code>${mb.email}</code>\n\n` +
-      `📡 <b>Relay:</b> <code>${mb.domain} (Ultra-Fast)</code>\n` +
-      `⏳ <b>Status:</b> 🟢 <i>Listening for incoming OTPs...</i>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━`;
+      `📡 <b>Relay:</b> <code>${mb.domain}</code>\n` +
+      `⏳ <b>Status:</b> 🟢 <i>Listening for OTPs...</i>`;
 
     const token = `${mb.type}_${mb.user}_${mb.domain}_${mb.sid}`;
-    const kb = {
+    return edit(chatId, messageId, out, {
       inline_keyboard: [
         [{ text: "📩 Fetch OTP / Check Inbox", callback_data: `chk_${token}` }],
         [
@@ -602,16 +657,14 @@ async function handleTelegramUpdate(update) {
           { text: "⚡ New Mail", callback_data: "gen" }
         ],
         [
-          { text: "📷 Get QR Code", callback_data: `qr_${mb.email}` },
-          { text: "🌐 Switch Domain", callback_data: "domains" }
-        ],
-        [{ text: "🏠 Main Menu", callback_data: "home" }]
+          { text: "🌐 Switch Domain", callback_data: "domains" },
+          { text: "🏠 Home Menu", callback_data: "home" }
+        ]
       ]
-    };
-    return edit(chatId, messageId, out, kb);
+    });
   }
 
-  // 7. Check Temp Mail Inbox
+  // Inbox Checker for General Temp Mail
   if (data && data.startsWith("chk_")) {
     const [, type, user, domain, sid] = data.split("_");
     const activeEmail = `${user}@${domain}`;
@@ -620,151 +673,88 @@ async function handleTelegramUpdate(update) {
     const list = await fetchFastMessages(type, user, domain, sid);
 
     if (!list || list.length === 0) {
-      const empty = 
-        `📭 <b>INBOX STATUS: WAITING FOR OTP...</b>\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `📧 <b>Address:</b> <code>${activeEmail}</code>\n\n` +
-        `⚠️ <i>No message received yet. Send code and wait 3-5 sec before refreshing!</i>\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━`;
-
-      const kb = {
+      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${activeEmail}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, {
         inline_keyboard: [
-          [{ text: "🔄 Refresh Inbox Now", callback_data: `chk_${token}` }],
-          [
-            { text: "⚡ Generate New Mail", callback_data: "gen" },
-            { text: "🌐 Switch Domain", callback_data: "domains" }
-          ],
-          [{ text: "🏠 Main Menu", callback_data: "home" }]
+          [{ text: "🔄 Refresh Inbox", callback_data: `chk_${token}` }],
+          [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home Menu", callback_data: "home" }]
         ]
-      };
-      return edit(chatId, messageId, empty, kb);
+      });
     }
 
-    let report = 
-      `📬 <b>INBOX — (${list.length}) MESSAGE(S) RECEIVED</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `📧 <b>Mailbox:</b> <code>${activeEmail}</code>\n\n`;
+    let report = `📬 <b>INBOX RECEIVED (${list.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${activeEmail}</code>\n\n`;
+    let detectedOtp = null;
 
     for (let i = 0; i < Math.min(list.length, 3); i++) {
       const m = list[i];
       const mailDetails = await fetchFastDetail(type, user, domain, sid, m.id);
-
-      const sender = escapeHtml(mailDetails.from || m.from || "Unknown");
-      const subject = escapeHtml(mailDetails.subject || m.subject || "No Subject");
-      const fullText = subject + " " + (mailDetails.body || "");
+      const fullText = (mailDetails.subject || "") + " " + (mailDetails.body || "");
       const otp = extractSmartOtp(fullText);
+      if (otp && !detectedOtp) detectedOtp = otp;
 
-      report += `📩 <b>Message #${i + 1}</b>\n`;
-      report += `👤 <b>From:</b> <code>${sender}</code>\n`;
-      report += `📝 <b>Subject:</b> <i>${subject}</i>\n`;
-
+      report += `📩 <b>From:</b> <code>${escapeHtml(mailDetails.from)}</code>\n`;
+      report += `📝 <b>Subject:</b> <i>${escapeHtml(mailDetails.subject)}</i>\n`;
       if (otp) {
-        report += `\n🔑 <b>DETECTED OTP:</b> <code>${otp}</code> <i>(Tap code to copy)</i>\n`;
-      } else {
-        const snippet = escapeHtml((mailDetails.body || "").replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').substring(0, 100));
-        if (snippet) report += `📄 <b>Content:</b> <code>${snippet}...</code>\n`;
+        report += `🔑 <b>DETECTED OTP:</b> <code>${otp}</code>\n`;
       }
       report += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     }
 
-    const kb = {
-      inline_keyboard: [
-        [{ text: "🔄 Refresh Inbox", callback_data: `chk_${token}` }],
-        [
-          { text: "⚡ New Mail", callback_data: "gen" },
-          { text: "🌐 Switch Domain", callback_data: "domains" }
-        ],
-        [{ text: "🏠 Main Menu", callback_data: "home" }]
-      ]
-    };
-    return edit(chatId, messageId, report, kb);
+    const kbRows = [[{ text: "🔄 Refresh Inbox", callback_data: `chk_${token}` }]];
+    if (detectedOtp) {
+      kbRows.unshift([{ text: `📋 Copy OTP: ${detectedOtp}`, callback_data: "dummy" }]);
+    }
+    kbRows.push([{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home Menu", callback_data: "home" }]);
+
+    return edit(chatId, messageId, report, { inline_keyboard: kbRows });
   }
 
-  // 8. Domain Selection
+  // Domains Screen
   if (data === "domains") {
-    const dMsg = `🌐 <b>SELECT PREFERRED DOMAIN</b>\n━━━━━━━━━━━━━━━━━━━━━━\nPick an active domain for your new mailbox:`;
     const rows = [];
     for (let i = 0; i < DOMAINS.length; i += 2) {
       const row = [{ text: `@${DOMAINS[i]}`, callback_data: `dgen_${DOMAINS[i]}` }];
       if (DOMAINS[i + 1]) row.push({ text: `@${DOMAINS[i + 1]}`, callback_data: `dgen_${DOMAINS[i + 1]}` });
       rows.push(row);
     }
-    rows.push([{ text: "⬅️ Back to Menu", callback_data: "home" }]);
-    return edit(chatId, messageId, dMsg, { inline_keyboard: rows });
+    rows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
+    return edit(chatId, messageId, `🌐 <b>Select Domain:</b>`, { inline_keyboard: rows });
   }
 
-  // 9. Recent History
+  // History Screen
   if (data === "history") {
     const list = session.history || [];
-    let hMsg = `📜 <b>RECENT ACTIVE MAILBOXES</b>\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-    if (list.length === 0) {
-      hMsg += `<i>No recent inboxes found. Generate one first!</i>`;
-    } else {
-      list.forEach((e, idx) => {
-        hMsg += `${idx + 1}. <code>${e}</code>\n`;
-      });
-    }
-    const kb = {
-      inline_keyboard: [
-        [{ text: "⚡ Generate Fresh Mail", callback_data: "gen" }],
-        [{ text: "⬅️ Back to Menu", callback_data: "home" }]
-      ]
-    };
-    return edit(chatId, messageId, hMsg, kb);
+    let hMsg = `📜 <b>Recent Inboxes:</b>\n\n` + (list.map((e, idx) => `${idx + 1}. <code>${e}</code>`).join('\n') || "None");
+    return edit(chatId, messageId, hMsg, {
+      inline_keyboard: [[{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home Menu", callback_data: "home" }]]
+    });
   }
 
-  // 10. Help Guide
+  // Help Screen
   if (data === "help") {
     const hText = 
       `📖 <b>HOW TO USE ALOKMAIL PRO</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `1️⃣ <b>Generate Fresh Mailbox:</b> Instant disposable email for signup verification.\n` +
-      `2️⃣ <b>Fetch OTP:</b> Instant 4-8 digit verification code detection in 1 tap.\n` +
-      `3️⃣ <b>Instagram Vault:</b> Admin-protected storage for managing account credentials.\n\n` +
-      `💡 <i>Custom Alias Command:</i>\n<code>/set yourname sharklasers.com</code>`;
+      `1️⃣ <b>Temp Mail:</b> Generate instant temporary emails for general signups.\n` +
+      `2️⃣ <b>Meta AI Hub:</b> Create Meta accounts step-by-step with live DOB, name generator, OTP listener, and instant email swapping.\n` +
+      `3️⃣ <b>Instagram Vault:</b> Secure storage for created accounts.`;
 
-    const kb = {
-      inline_keyboard: [
-        [{ text: "⚡ Generate Mailbox Now", callback_data: "gen" }],
-        [{ text: "⬅️ Back to Menu", callback_data: "home" }]
-      ]
-    };
-    return edit(chatId, messageId, hText, kb);
+    return edit(chatId, messageId, hText, {
+      inline_keyboard: [[{ text: "🏠 Return to Home Menu", callback_data: "home" }]]
+    });
   }
 
-  // 11. Server Status
+  // Status Screen
   if (data === "status") {
     const sText = 
       `🛡️ <b>SYSTEM TELEMETRY STATUS</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `• <b>Engine:</b> 🟢 Guerrilla & 1Sec Failover Active\n` +
-      `• <b>Vault System:</b> 🔒 Protected (Admin Only)\n` +
+      `• <b>Meta Wizard:</b> 🟢 Active & Ready\n` +
       `• <b>Platform:</b> Cloudflare Workers Global Edge\n` +
       `• <b>Latency:</b> < 15ms`;
 
-    const kb = {
-      inline_keyboard: [
-        [{ text: "⚡ Generate Fresh Mail", callback_data: "gen" }],
-        [{ text: "⬅️ Back", callback_data: "home" }]
-      ]
-    };
-    return edit(chatId, messageId, sText, kb);
-  }
-
-  // 12. QR Code
-  if (data && data.startsWith("qr_")) {
-    const qrEmail = data.replace("qr_", "");
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrEmail)}`;
-    
-    return fetch(`${TELEGRAM_API}/sendPhoto`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        photo: qrUrl,
-        caption: `📷 <b>QR Code for:</b> <code>${qrEmail}</code>\n<i>(Scan to copy address)</i>`,
-        parse_mode: "HTML"
-      })
+    return edit(chatId, messageId, sText, {
+      inline_keyboard: [[{ text: "🏠 Back", callback_data: "home" }]]
     });
   }
 }
@@ -790,11 +780,7 @@ async function sendDocument(chatId, content, filename, caption) {
   formData.append("caption", caption);
   formData.append("parse_mode", "HTML");
   formData.append("document", new Blob([content], { type: "text/plain" }), filename);
-
-  return fetch(`${TELEGRAM_API}/sendDocument`, {
-    method: "POST",
-    body: formData
-  });
+  return fetch(`${TELEGRAM_API}/sendDocument`, { method: "POST", body: formData });
 }
 
 function escapeHtml(str) {

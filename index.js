@@ -1,488 +1,733 @@
 /**
- * 👑 AlokOTP Pro — FULL-STACK WEB APP EDITION (Grizzly SMS Clone)
- * Dynamic Grizzly Catalog, 3% Margin, Bot Deposit Button, Admin Panel
+ * ============================================
+ *  ALOKMAIL PRO X — ENTERPRISE ENGINE (FREE)
+ *  Temp Mail (Guerrilla + 1SecMail) + Outlook CSV Queue + Full Admin Suite
+ *  Platform: Cloudflare Workers
+ *  Owner ID: 8452322818
+ * ============================================
  */
 
-const BOT_TOKEN = "8958056500:AAFPh8tVoxDaZEy_dyw6f_oZWX_lFGyTCUc";
-const ADMIN_ID = 8452322818;
-const GRIZZLY_API_KEY = "7cd21341575f5a4b44c040530c314b3e";
-const GRIZZLY_BASE = "https://api.grizzlysms.com/stubs/handler_api.php";
-const PROFIT_PERCENTAGE = 0.03; // 3% Profit Margin
+const BOT_TOKEN = "8759442095:AAGCsqImU2IssXIvPIs-2Mdc1vZcdw92UDI";
+const OWNER_ID = "8452322818";
+const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-// Country ISO Mapping
-const COUNTRY_MAP = {
-  "0": { name: "Russia", iso: "ru" }, "1": { name: "Ukraine", iso: "ua" },
-  "2": { name: "Kazakhstan", iso: "kz" }, "3": { name: "China", iso: "cn" },
-  "4": { name: "Philippines", iso: "ph" }, "5": { name: "Myanmar", iso: "mm" },
-  "6": { name: "Indonesia", iso: "id" }, "11": { name: "USA", iso: "us" },
-  "22": { name: "India", iso: "in" }, "36": { name: "Canada", iso: "ca" },
-  "43": { name: "Germany", iso: "de" }, "73": { name: "Brazil", iso: "br" }
+// ============================================
+//  GLOBAL STORES
+// ============================================
+
+const USER_STATE = new Map();
+const OUTLOOK_STORE = {
+  active: [],
+  expired: [],
+  current: null
 };
 
-// Top Services
-const TOP_SERVICES = [
-  { code: 'wa', name: 'WhatsApp', icon: 'fab fa-whatsapp', color: '#25D366' },
-  { code: 'tg', name: 'Telegram', icon: 'fab fa-telegram-plane', color: '#0088cc' },
-  { code: 'ig', name: 'Instagram', icon: 'fab fa-instagram', color: '#E1306C' },
-  { code: 'go', name: 'Google', icon: 'fab fa-google', color: '#DB4437' },
-  { code: 'fb', name: 'Facebook', icon: 'fab fa-facebook-f', color: '#1877F2' }
+const STATS = {
+  totalEmails: 0,
+  totalOTPs: 0,
+  activeUsers: 0,
+  startTime: Date.now()
+};
+
+// ============================================
+//  NAME POOLS & DOMAINS
+// ============================================
+
+const NAME_POOL = [
+  'priya', 'sneha', 'pooja', 'ananya', 'riya', 'kavya', 'tanvi', 'shreya',
+  'divya', 'aditi', 'simran', 'megha', 'ishita', 'muskan', 'radhika', 'neha',
+  'kritika', 'anjali', 'bhavna', 'chahat', 'deepika', 'esha', 'falguni', 'gauri',
+  'hina', 'isha', 'jiya', 'kiran', 'lavanya', 'mahi', 'nandini', 'oviya',
+  'palak', 'qandeel', 'ritika', 'sanya', 'trisha', 'urvi', 'vidhi', 'yashika',
+  'alok', 'rahul', 'rohit', 'amit', 'vikas', 'arjun', 'varun', 'karan',
+  'sahil', 'manish', 'aakash', 'dev', 'ayush', 'yash', 'nikhil', 'harsh',
+  'aditya', 'bhavesh', 'chirag', 'dhruv', 'eshan', 'faisal', 'gaurav', 'himanshu'
 ];
 
-// ==========================================
-// 1. FRONTEND: HIGH-PERFORMANCE MODERN UI
-// ==========================================
-const buildHTML = () => `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AlokOTP Pro</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/lipis/flag-icons@6.11.0/css/flag-icons.min.css">
-    <style>
-        :root { --bg-color: #0f172a; --card-bg: #1e293b; --text-main: #f8fafc; --text-muted: #94a3b8; --primary: #ff6a00; --success: #10b981; --danger: #ef4444; --border: #334155; }
-        body { font-family: -apple-system, sans-serif; background: var(--bg-color); color: var(--text-main); margin: 0; padding: 0; padding-bottom: 90px; user-select: none; }
-        .header { background: rgba(30,41,59,0.7); backdrop-filter: blur(12px); padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid var(--border); }
-        .logo { font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
-        .logo i { color: var(--primary); }
-        .balance-badge { background: linear-gradient(135deg, #ff6a00, #ee0979); padding: 7px 14px; border-radius: 20px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
-        .container { padding: 16px; max-width: 600px; margin: 0 auto; }
-        .section-title { font-size: 15px; font-weight: 700; margin: 16px 0 10px 0; color: var(--text-muted); text-transform: uppercase; display: flex; justify-content: space-between;}
-        .services-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
-        .svc-chip { flex: 0 0 auto; background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
-        .svc-chip.active { border-color: var(--primary); background: rgba(255,106,0,0.15); color: #fff; }
-        .search-box { width: 100%; background: var(--card-bg); border: 1px solid var(--border); padding: 12px 14px; border-radius: 12px; color: var(--text-main); outline: none; margin-bottom: 16px; box-sizing: border-box;}
-        .search-box:focus { border-color: var(--primary); }
-        .country-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-        .country-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
-        .buy-btn { background: var(--primary); color: #fff; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; }
-        .order-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 12px; }
-        .phone-display { font-size: 22px; font-weight: 800; color: var(--primary); background: #0f172a; padding: 10px; border-radius: 10px; margin: 10px 0; text-align: center; letter-spacing: 1px;}
-        .otp-code-box { background: rgba(16,185,129,0.15); border: 1px dashed var(--success); color: var(--success); padding: 12px; text-align: center; font-size: 24px; font-weight: 900; border-radius: 10px; margin: 10px 0;}
-        .action-btns { display: flex; gap: 8px; }
-        .btn-act { flex: 1; padding: 10px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer; color:#fff;}
-        .btn-check { background: var(--success); }
-        .btn-cancel { background: var(--danger); }
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(30,41,59,0.9); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 10px 0; z-index: 99; }
-        .nav-item { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: var(--text-muted); cursor: pointer; font-weight: 600; gap:4px; }
-        .nav-item.active { color: var(--primary); }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="logo"><i class="fas fa-paw"></i> AlokOTP</div>
-        <div class="balance-badge" id="balDisplay"><i class="fas fa-spinner fa-spin"></i></div>
-    </div>
+const ADJECTIVE_POOL = [
+  'swift', 'cool', 'smart', 'bold', 'shiny', 'quiet', 'brave', 'lucky',
+  'royal', 'urban', 'silent', 'rapid', 'prime', 'sunny', 'noble', 'crisp',
+  'vivid', 'chill', 'sharp', 'fresh', 'stellar', 'lively', 'breezy', 'golden'
+];
 
-    <div class="container">
-        <!-- Store View -->
-        <div id="viewStore">
-            <div class="section-title">Select Service</div>
-            <div class="services-scroll" id="topServicesList"></div>
-            <div class="section-title" style="margin-top:20px;"><span>Select Country</span><span id="totalStockCount" style="color:var(--primary); font-size:12px;">0</span></div>
-            <input type="text" id="searchBox" class="search-box" placeholder="Search country..." onkeyup="filterCountries()">
-            <div id="stockLoader" style="text-align:center; padding:20px; color:var(--text-muted);">Loading Live Stock...</div>
-            <div class="country-grid" id="countryList"></div>
+const DOMAINS = [
+  'sharklasers.com', 'guerrillamail.com', 'guerrillamailblock.com', 'spam4.me',
+  'pokemail.net', '1secmail.com', '1secmail.org', '1secmail.net'
+];
+
+// ============================================
+//  UTILITY FUNCTIONS
+// ============================================
+
+function getRandomUser() {
+  const adj = ADJECTIVE_POOL[Math.floor(Math.random() * ADJECTIVE_POOL.length)];
+  const name = NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)];
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `${adj}${name.charAt(0).toUpperCase() + name.slice(1)}${num}`.toLowerCase();
+}
+
+function extractSmartOtp(text) {
+  if (!text) return null;
+  const clean = text.replace(/<[^>]*>/g, ' ');
+  const match = clean.match(/(?:OTP|code|verification code|passcode|secret code|pin|c\u00f3digo|pin code)\D{0,14}(\d{4,8})/i) || clean.match(/\b\d{4,8}\b/);
+  return match ? (match[1] || match[0]) : null;
+}
+
+function parseAccountLine(line) {
+  line = line.trim();
+  if (!line) return null;
+  let delimiter = '|';
+  if (!line.includes('|')) {
+    if (line.includes(';')) delimiter = ';';
+    else if (line.includes(',')) delimiter = ',';
+    else if (line.includes(':')) delimiter = ':';
+    else if (line.includes('\t')) delimiter = '\t';
+  }
+  const parts = line.split(delimiter).map(p => p.trim().replace(/^["']|["']$/g, ''));
+  if (parts.length >= 2) {
+    return {
+      email: parts[0],
+      password: parts[1],
+      token: parts[3] || parts[2] || "",
+      raw: line
+    };
+  }
+  return null;
+}
+
+function escapeHtml(str) {
+  return (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ============================================
+//  EMAIL API FUNCTIONS
+// ============================================
+
+async function createFastMailbox(domainChoice = null, customUser = null) {
+  const user = customUser || getRandomUser();
+  const domain = domainChoice || DOMAINS[Math.floor(Math.random() * DOMAINS.length)];
+  const isGuerrilla = !domain.includes('1secmail');
+
+  if (isGuerrilla) {
+    try {
+      const initRes = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address');
+      const initData = await initRes.json();
+      const sid = initData.sid_token;
+
+      const setRes = await fetch(`https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`);
+      const setData = await setRes.json();
+      const email = (setData.email_addr || `${user}@${domain}`).toLowerCase();
+      STATS.totalEmails++;
+      return { type: 'g', email, user, domain, sid };
+    } catch (e) {
+      STATS.totalEmails++;
+      return { type: 's', email: `${user}@1secmail.com`, user, domain: '1secmail.com', sid: '0' };
+    }
+  } else {
+    STATS.totalEmails++;
+    return { type: 's', email: `${user}@${domain}`, user, domain, sid: '0' };
+  }
+}
+
+async function fetchFastMessages(type, user, domain, sid) {
+  if (type === 'g' && sid !== '0') {
+    try {
+      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${sid}`);
+      const data = await res.json();
+      return (data.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com').map(m => ({
+        id: m.mail_id,
+        from: m.mail_from,
+        subject: m.mail_subject || '(No Subject)'
+      }));
+    } catch (e) {
+      return [];
+    }
+  } else {
+    try {
+      const res = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${encodeURIComponent(user)}&domain=${encodeURIComponent(domain)}`);
+      return await res.json();
+    } catch (e) {
+      return [];
+    }
+  }
+}
+
+async function fetchFastDetail(type, user, domain, sid, id) {
+  if (type === 'g' && sid !== '0') {
+    try {
+      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${id}&sid_token=${sid}`);
+      const mail = await res.json();
+      return {
+        from: mail.mail_from || 'Unknown',
+        subject: mail.mail_subject || '(No Subject)',
+        body: mail.mail_body || mail.mail_excerpt || ''
+      };
+    } catch (e) {
+      return { from: 'Unknown', subject: '', body: '' };
+    }
+  } else {
+    try {
+      const res = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${encodeURIComponent(user)}&domain=${encodeURIComponent(domain)}&id=${encodeURIComponent(id)}`);
+      const mail = await res.json();
+      return {
+        from: mail.from || 'Unknown',
+        subject: mail.subject || '(No Subject)',
+        body: mail.textBody || mail.htmlBody || ''
+      };
+    } catch (e) {
+      return { from: 'Unknown', subject: '', body: '' };
+    }
+  }
+}
+
+async function fetchOutlookOtp(email, password, token) {
+  try {
+    const res = await fetch(`https://outlook.office365.com/api/v2.0/me/messages`, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+    if (!res.ok) return { error: "Token expired or invalid auth", otp: null };
+    const data = await res.json();
+    const messages = data.value || [];
+    if (messages.length === 0) return { otp: null, subject: "No messages found in Inbox" };
+
+    const latest = messages[0];
+    const fullContent = (latest.Subject || "") + " " + (latest.BodyPreview || "");
+    const otp = extractSmartOtp(fullContent);
+    if (otp) STATS.totalOTPs++;
+    return { otp, subject: latest.Subject, from: latest.From?.EmailAddress?.Address || "Outlook Service" };
+  } catch (e) {
+    return { error: "Network connection error with server", otp: null };
+  }
+}
+
+// ============================================
+//  WEB DASHBOARD HANDLER
+// ============================================
+
+async function handleWebDashboard(request) {
+  const url = new URL(request.url);
+  if (url.pathname === "/dashboard") {
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>AlokMail Pro — Dashboard</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; }
+        body { background: #0f0f1a; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { font-size: 2rem; color: #6C63FF; margin-bottom: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 30px; }
+        .stat-card { background: #1a1a2e; border: 1px solid #2a2a4e; border-radius: 12px; padding: 20px; text-align: center; }
+        .stat-card h3 { font-size: 2rem; color: #6C63FF; }
+        .stat-card p { color: #888; font-size: 0.85rem; margin-top: 4px; }
+        .section-title { font-size: 1.1rem; margin: 24px 0 12px; color: #aaa; }
+        .footer { margin-top: 30px; text-align: center; color: #555; font-size: 0.8rem; }
+        .badge { display: inline-block; background: #6C63FF; color: white; padding: 2px 12px; border-radius: 20px; font-size: 0.7rem; margin-left: 8px; }
+        .online { color: #4CAF50; }
+        .log-list { background: #1a1a2e; border-radius: 12px; padding: 12px; max-height: 300px; overflow-y: auto; }
+        .log-item { padding: 6px 10px; border-bottom: 1px solid #2a2a4e; font-size: 0.85rem; }
+        .log-item .time { color: #666; margin-right: 10px; }
+        .type-email { color: #6C63FF; }
+        .type-otp { color: #4CAF50; }
+        .type-outlook { color: #FF6B6B; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>🛡️ AlokMail Pro <span class="badge">Enterprise</span></h1>
+        <div class="stats-grid">
+          <div class="stat-card"><h3>${STATS.totalEmails}</h3><p>Total Emails</p></div>
+          <div class="stat-card"><h3>${STATS.totalOTPs}</h3><p>Total OTPs</p></div>
+          <div class="stat-card"><h3>${USER_STATE.size}</h3><p>Active Users</p></div>
+          <div class="stat-card"><h3>${OUTLOOK_STORE.active.length}</h3><p>Outlook Queue</p></div>
+          <div class="stat-card"><h3>${Math.floor((Date.now() - STATS.startTime) / 86400000)}d</h3><p>Uptime</p></div>
         </div>
-
-        <!-- Orders View -->
-        <div id="viewOrders" style="display:none;">
-            <div class="section-title">Active Numbers</div>
-            <div id="activeOrdersList"></div>
+        <div class="section-title">📋 System Logs</div>
+        <div class="log-list">
+          <div class="log-item"><span class="time">🟢</span> <span class="type-email">Email</span> System initialized</div>
+          <div class="log-item"><span class="time">🟢</span> <span class="type-outlook">Outlook</span> Queue: ${OUTLOOK_STORE.active.length} accounts</div>
         </div>
+        <div class="footer">AlokMail Pro X — Free Enterprise Engine • Cloudflare Workers</div>
+      </div>
+    </body>
+    </html>
+    `;
+    return new Response(html, { headers: { "Content-Type": "text/html" } });
+  }
+  return null;
+}
 
-        <!-- Deposit View -->
-        <div id="viewDeposit" style="display:none;">
-            <div class="section-title">Deposit Funds</div>
-            <div class="order-card" style="text-align:center;">
-                <h3 style="margin-bottom:10px;">Pay via UPI</h3>
-                <div style="background:#0f172a; padding:12px; border-radius:10px; font-weight:bold; font-size:16px; margin-bottom:15px;" id="adminUpiDisplay">Loading...</div>
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:15px;">Pay on above UPI and contact admin to add balance.</p>
-                <button class="btn-act" style="background:var(--primary); width:100%;" onclick="tg.openTelegramLink('https://t.me/AlokAdminSupport')">Contact Admin</button>
-            </div>
-        </div>
-    </div>
+// ============================================
+//  MAIN FETCH HANDLER
+// ============================================
 
-    <div class="bottom-nav">
-        <div class="nav-item active" id="navStore" onclick="switchTab('store')"><i class="fas fa-store"></i> Store</div>
-        <div class="nav-item" id="navOrders" onclick="switchTab('orders')"><i class="fas fa-sim-card"></i> Orders</div>
-        <div class="nav-item" id="navDeposit" onclick="switchTab('deposit')"><i class="fas fa-wallet"></i> Deposit</div>
-    </div>
-
-    <script>
-        const tg = window.Telegram.WebApp;
-        tg.expand();
-        const API_URL = window.location.href;
-        let userId = tg.initDataUnsafe?.user?.id || 'TEST_USER';
-        
-        let currentSrv = 'wa';
-        let rawStockData = [];
-        const TOP_SERVICES = ${JSON.stringify(TOP_SERVICES)};
-        const COUNTRY_MAP = ${JSON.stringify(COUNTRY_MAP)};
-
-        async function initApp() {
-            renderServiceChips();
-            await fetchUserBalance();
-            await loadStock(currentSrv);
-            setInterval(checkAllActiveOrders, 5000); // Auto Check OTP
-        }
-
-        function renderServiceChips() {
-            document.getElementById('topServicesList').innerHTML = TOP_SERVICES.map(s => \`
-                <div class="svc-chip \${s.code === currentSrv ? 'active' : ''}" onclick="selectService('\${s.code}')">
-                    <i class="\${s.icon}" style="color:\${s.color}"></i> \${s.name}
-                </div>
-            \`).join('');
-        }
-
-        function selectService(code) { currentSrv = code; renderServiceChips(); loadStock(code); }
-
-        async function fetchUserBalance() {
-            try {
-                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ type: 'api', action: 'get_user', userId }) });
-                const data = await res.json();
-                document.getElementById('balDisplay').innerHTML = \`<i class="fas fa-wallet"></i> $\${data.balance}\`;
-                if(data.upi) document.getElementById('adminUpiDisplay').innerText = data.upi;
-            } catch(e) {}
-        }
-
-        async function loadStock(srvCode) {
-            document.getElementById('stockLoader').style.display = 'block';
-            document.getElementById('countryList').innerHTML = '';
-            try {
-                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ type: 'api', action: 'get_stock', service: srvCode }) });
-                const data = await res.json();
-                rawStockData = data.items || [];
-                document.getElementById('totalStockCount').innerText = rawStockData.length;
-                renderCountries(rawStockData);
-            } catch(e) {}
-            document.getElementById('stockLoader').style.display = 'none';
-        }
-
-        function renderCountries(items) {
-            const list = document.getElementById('countryList');
-            list.innerHTML = items.map(item => {
-                const cMeta = COUNTRY_MAP[item.id] || { name: \`Country \${item.id}\`, iso: 'un' };
-                return \`
-                    <div class="country-card">
-                        <div class="c-info">
-                            <span class="fi fi-\${cMeta.iso}" style="font-size:20px;"></span>
-                            <div>
-                                <div style="font-weight:bold; font-size:14px;">\${cMeta.name}</div>
-                                <div style="font-size:12px; color:var(--text-muted);">\${item.stock} pcs</div>
-                            </div>
-                        </div>
-                        <button class="buy-btn" onclick="buyNumber('\${item.id}', '\${item.price}')">$\${item.price}</button>
-                    </div>
-                \`;
-            }).join('');
-        }
-
-        function filterCountries() {
-            const q = document.getElementById('searchBox').value.toLowerCase();
-            renderCountries(rawStockData.filter(i => (COUNTRY_MAP[i.id]?.name || '').toLowerCase().includes(q)));
-        }
-
-        async function buyNumber(countryId, price) {
-            tg.showConfirm(\`Buy number for $\${price}?\`, async (ok) => {
-                if(!ok) return;
-                tg.MainButton.showProgress();
-                try {
-                    const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ type: 'api', action: 'buy', userId, service: currentSrv, country: countryId, price }) });
-                    const data = await res.json();
-                    if(data.success) { tg.showAlert("✅ Success!"); switchTab('orders'); fetchUserBalance(); }
-                    else tg.showAlert(\`❌ \${data.message}\`);
-                } catch(e) {}
-                tg.MainButton.hideProgress();
-            });
-        }
-
-        async function loadActiveOrders() {
-            try {
-                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ type: 'api', action: 'get_orders', userId }) });
-                const data = await res.json();
-                const container = document.getElementById('activeOrdersList');
-                if(!data.orders.length) { container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No active numbers</div>'; return; }
-                
-                container.innerHTML = data.orders.map(o => \`
-                    <div class="order-card">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                            <strong style="color:var(--primary); text-transform:uppercase;">\${o.service}</strong>
-                            <span style="font-size:12px; background:\${o.status==='OK'?'rgba(16,185,129,0.2)':'rgba(245,158,11,0.2)'}; padding:3px 8px; border-radius:10px; color:\${o.status==='OK'?'var(--success)':'var(--primary)'}">\${o.status==='OK'?'OTP RECEIVED':'WAITING SMS...'}</span>
-                        </div>
-                        <div class="phone-display" onclick="navigator.clipboard.writeText('+\${o.phone}'); tg.showAlert('Number Copied!');">+\${o.phone}</div>
-                        \${o.code ? \`<div class="otp-code-box" onclick="navigator.clipboard.writeText('\${o.code}'); tg.showAlert('OTP Copied!');">\${o.code}</div>\` : ''}
-                        <div class="action-btns" style="margin-top:10px;">
-                            \${o.status !== 'OK' ? \`<button class="btn-act btn-check" onclick="checkOTP('\${o.actId}', true)">Check SMS</button>\` : ''}
-                            <button class="btn-act btn-cancel" onclick="cancelOrder('\${o.actId}')">Cancel & Refund</button>
-                        </div>
-                    </div>
-                \`).join('');
-            } catch(e) {}
-        }
-
-        async function checkOTP(actId, manual = false) {
-            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ type: 'api', action: 'status', actId }) });
-            const data = await res.json();
-            if(data.status === 'OK') {
-                if(manual) tg.showAlert(\`🎉 SMS Received: \${data.code}\`);
-                loadActiveOrders();
-            } else if (manual) {
-                tg.showAlert("⏳ Still waiting for SMS...");
-            }
-        }
-
-        async function checkAllActiveOrders() {
-            if(document.getElementById('viewOrders').style.display !== 'none') loadActiveOrders();
-        }
-
-        async function cancelOrder(actId) {
-            tg.showConfirm("Cancel and refund money automatically?", async (ok) => {
-                if(!ok) return;
-                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ type: 'api', action: 'cancel', userId, actId }) });
-                const data = await res.json();
-                if(data.success) { tg.showAlert("✅ Order Cancelled & Refunded!"); loadActiveOrders(); fetchUserBalance(); }
-                else tg.showAlert(\`❌ Error: \${data.message}\`);
-            });
-        }
-
-        function switchTab(tab) {
-            ['Store', 'Orders', 'Deposit'].forEach(t => { document.getElementById(\`view\${t}\`).style.display = 'none'; document.getElementById(\`nav\${t}\`).classList.remove('active'); });
-            document.getElementById(\`view\${tab.charAt(0).toUpperCase() + tab.slice(1)}\`).style.display = 'block';
-            document.getElementById(\`nav\${tab.charAt(0).toUpperCase() + tab.slice(1)}\`).classList.add('active');
-            if(tab === 'orders') loadActiveOrders();
-        }
-        initApp();
-    </script>
-</body>
-</html>
-`;
-
-// ==========================================
-// 2. BACKEND: CLOUDFLARE WORKER ROUTER
-// ==========================================
 export default {
   async fetch(request, env, ctx) {
-    if (request.method === "GET") {
-      const url = new URL(request.url);
-      
-      // AUTO-WEBHOOK SETUP
-      if (url.pathname === "/setup") {
-          const webhookUrl = url.origin + "/";
-          const setupApiUrl = "https://api.telegram.org/bot" + BOT_TOKEN + "/setWebhook?url=" + encodeURIComponent(webhookUrl);
-          const resp = await fetch(setupApiUrl);
-          const result = await resp.json();
-          return new Response(JSON.stringify({ 
-              message: "Webhook Setup Status", 
-              success: result.ok,
-              description: result.description
-          }, null, 2), { headers: { "Content-Type": "application/json" } });
-      }
-      return new Response(buildHTML(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    const dashboardResponse = await handleWebDashboard(request);
+    if (dashboardResponse) return dashboardResponse;
+
+    if (request.method !== "POST") {
+      return new Response("⚡ AlokMail Pro X — Enterprise Engine Running 24/7!", { status: 200 });
     }
-
-    if (request.method === "POST") {
-      try {
-        const body = await request.json();
-
-        // 🟢 WEB APP INTERNAL API
-        if (body.type === 'api') {
-            if (body.action === 'get_user') {
-                const user = await getUser(body.userId, env);
-                const upi = await env.USERS_DB.get("admin:upi") || "UPI Not Set";
-                return new Response(JSON.stringify({ balance: user.balance.toFixed(2), upi }), { headers: { "Content-Type": "application/json" } });
-            }
-            if (body.action === 'get_stock') {
-                const stock = await fetchLiveStock(body.service);
-                return new Response(JSON.stringify({ items: stock }), { headers: { "Content-Type": "application/json" } });
-            }
-            if (body.action === 'buy') {
-                const user = await getUser(body.userId, env);
-                if (user.balance < parseFloat(body.price)) return new Response(JSON.stringify({ success: false, message: "Insufficient Balance!" }));
-                const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getNumber&service=" + body.service + "&country=" + body.country);
-                const text = await res.text();
-                if (text.startsWith("ACCESS_NUMBER")) {
-                    const parts = text.split(":");
-                    const actId = parts[1];
-                    const phone = parts[2];
-                    
-                    await adjustBalance(body.userId, -parseFloat(body.price), env);
-                    const orderData = { actId: actId, userId: body.userId, cost: parseFloat(body.price), phone: phone, service: body.service, status: "WAITING", code: null };
-                    await env.USERS_DB.put("act:" + actId, JSON.stringify(orderData));
-                    
-                    let userOrdersStr = await env.USERS_DB.get("user_orders:" + body.userId);
-                    let userOrders = userOrdersStr ? JSON.parse(userOrdersStr) : [];
-                    userOrders.push(actId);
-                    await env.USERS_DB.put("user_orders:" + body.userId, JSON.stringify(userOrders));
-                    return new Response(JSON.stringify({ success: true, actId: actId, phone: phone }));
-                }
-                return new Response(JSON.stringify({ success: false, message: text }));
-            }
-            if (body.action === 'get_orders') {
-                let userOrdersStr = await env.USERS_DB.get("user_orders:" + body.userId);
-                let userOrderIds = userOrdersStr ? JSON.parse(userOrdersStr) : [];
-                let activeOrders = [];
-                for (let actId of userOrderIds) {
-                    let oStr = await env.USERS_DB.get("act:" + actId);
-                    if (oStr) activeOrders.push(JSON.parse(oStr));
-                }
-                return new Response(JSON.stringify({ orders: activeOrders.reverse() }));
-            }
-            if (body.action === 'status') {
-                const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getStatus&id=" + body.actId);
-                const text = await res.text();
-                if (text.startsWith("STATUS_OK")) {
-                    const code = text.split(":")[1];
-                    let oStr = await env.USERS_DB.get("act:" + body.actId);
-                    if(oStr) {
-                        let order = JSON.parse(oStr);
-                        order.status = 'OK'; order.code = code;
-                        await env.USERS_DB.put("act:" + body.actId, JSON.stringify(order));
-                    }
-                    await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=setStatus&status=6&id=" + body.actId);
-                    return new Response(JSON.stringify({ status: 'OK', code: code }));
-                }
-                return new Response(JSON.stringify({ status: text }));
-            }
-            if (body.action === 'cancel') {
-                const orderStr = await env.USERS_DB.get("act:" + body.actId);
-                if (!orderStr) return new Response(JSON.stringify({ success: false, message: "Order not found" }));
-                const order = JSON.parse(orderStr);
-                const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=setStatus&status=8&id=" + body.actId);
-                const text = await res.text();
-                if (text === "ACCESS_CANCEL" || text === "STATUS_CANCEL") {
-                    await adjustBalance(body.userId, order.cost, env);
-                    await env.USERS_DB.delete("act:" + body.actId);
-                    let userOrdersStr = await env.USERS_DB.get("user_orders:" + body.userId);
-                    if (userOrdersStr) {
-                        let userOrders = JSON.parse(userOrdersStr).filter(id => id !== body.actId);
-                        await env.USERS_DB.put("user_orders:" + body.userId, JSON.stringify(userOrders));
-                    }
-                    return new Response(JSON.stringify({ success: true }));
-                }
-                return new Response(JSON.stringify({ success: false, message: text }));
-            }
-        }
-
-        // 🔵 TELEGRAM BOT & ADMIN PANEL
-        if (body.message) {
-            const chatId = body.message.chat.id;
-            const text = body.message.text || "";
-            const userId = body.message.from.id.toString();
-            
-            await ensureUser(userId, body.message.from, env);
-
-            if (text.startsWith("/start")) {
-                const user = await getUser(userId, env);
-                const welcomeText = "👑 *Welcome to AlokOTP Pro Store*\n\n💰 *Wallet Balance:* `$" + user.balance.toFixed(2) + "`\n🆔 *Your ID:* `" + userId + "`\n\n⚡ Buy virtual SMS numbers for WhatsApp, Telegram & 2000+ services.";
-                
-                const kb = { 
-                    inline_keyboard: [
-                        [{ text: "🚀 Open Web App Store", web_app: { url: request.url } }],
-                        [{ text: "💳 Deposit Funds", callback_data: "deposit_info" }, { text: "💬 Support", url: "https://t.me/AlokAdminSupport" }]
-                    ] 
-                };
-                
-                // Admin specific button
-                if (userId === ADMIN_ID.toString()) {
-                    kb.inline_keyboard.push([{ text: "🛡️ Admin Panel", callback_data: "admin_panel" }]);
-                }
-                
-                await sendTgMessage(chatId, welcomeText, kb);
-            }
-            
-            if (userId === ADMIN_ID.toString()) {
-                if (text.startsWith("/add")) {
-                    const parts = text.split(" ");
-                    if (parts.length === 3) {
-                        const newBal = await adjustBalance(parts[1], parseFloat(parts[2]), env);
-                        await sendTgMessage(chatId, "✅ Added `$" + parts[2] + "` to user `" + parts[1] + "`.\nNew Balance: `$" + newBal.toFixed(2) + "`");
-                    }
-                } else if (text.startsWith("/setupi")) {
-                    const upi = text.replace("/setupi", "").trim();
-                    await env.USERS_DB.put("admin:upi", upi);
-                    await sendTgMessage(chatId, "✅ UPI updated to: `" + upi + "`");
-                }
-            }
-        }
-
-        if (body.callback_query) {
-            const cb = body.callback_query;
-            const chatId = cb.message.chat.id;
-            const userId = cb.from.id.toString();
-            
-            if (cb.data === "deposit_info") {
-                const upi = await env.USERS_DB.get("admin:upi") || "Admin ne abhi UPI set nahi kiya hai.";
-                const depMsg = "💳 *Deposit Funds*\n\nApne wallet mein balance daalne ke liye is UPI par payment karein:\n\n🏦 *UPI ID:* `" + upi + "`\n\nPayment karne ke baad screenshot Admin ko bhejein 👇";
-                await sendTgMessage(chatId, depMsg, { inline_keyboard: [[{ text: "💬 Send Screenshot to Admin", url: "https://t.me/AlokAdminSupport" }]] });
-            }
-
-            if (cb.data === "admin_panel" && userId === ADMIN_ID.toString()) {
-                const upi = await env.USERS_DB.get("admin:upi") || "Not Set";
-                let gBal = "Loading...";
-                try {
-                    const gBalRes = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getBalance");
-                    gBal = await gBalRes.text();
-                } catch(e) {}
-
-                const txt = "🛡️ *Admin Control Dashboard*\n\n🐻 *Grizzly API Balance:* `" + gBal + "`\n🏦 *Current UPI:* `" + upi + "`\n📈 *Profit Margin:* `" + (PROFIT_PERCENTAGE * 100) + "%`\n\n*Admin Commands:*\n➕ Add Balance: `/add <UserID> <Amount>`\n🏦 Set UPI: `/setupi <your_upi@bank>`";
-                await sendTgMessage(chatId, txt);
-            }
-            await fetch("https://api.telegram.org/bot" + BOT_TOKEN + "/answerCallbackQuery", { method: "POST", body: JSON.stringify({ callback_query_id: cb.id }) });
-        }
-      } catch (err) {}
-      return new Response("OK", { status: 200 });
-    }
+    try {
+      const update = await request.json();
+      ctx.waitUntil(handleTelegramUpdate(update));
+    } catch (e) {}
+    return new Response("OK", { status: 200 });
   }
 };
 
-// ==========================================
-// 3. HELPER FUNCTIONS
-// ==========================================
-async function fetchLiveStock(serviceCode) {
+// ============================================
+//  TELEGRAM HANDLER
+// ============================================
+
+async function handleTelegramUpdate(update) {
+  const msg = update.message;
+  const cb = update.callback_query;
+  const chatId = msg?.chat?.id || cb?.message?.chat?.id;
+  const messageId = cb?.message?.message_id;
+  const text = msg?.text?.trim();
+  const data = cb?.data;
+  const userId = String(msg?.from?.id || cb?.from?.id || "");
+  const document = msg?.document;
+
+  if (!chatId) return;
+
+  if (cb?.id) {
+    await fetch(`${TELEGRAM_API}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cb.id })
+    }).catch(() => {});
+  }
+
+  let session = USER_STATE.get(userId) || { history: [] };
+
+  // ============================================
+  //  DOCUMENT UPLOAD
+  // ============================================
+
+  if (document) {
     try {
-        const res = await fetch(GRIZZLY_BASE + "?api_key=" + GRIZZLY_API_KEY + "&action=getPricesV3&service=" + serviceCode);
-        const data = await res.json();
-        
-        let availableStock = [];
-        for (const cId in data) {
-            if (data[cId] && data[cId][serviceCode]) {
-                const item = data[cId][serviceCode];
-                const stock = parseInt(item.count || 0);
-                if (stock > 0) {
-                    const baseCost = parseFloat(item.price || item.cost || 0.15);
-                    const finalPrice = (baseCost * (1 + PROFIT_PERCENTAGE)).toFixed(2); // 3% margin added here
-                    availableStock.push({ id: cId, name: COUNTRY_MAP[cId]?.name || "Country " + cId, stock: stock, price: finalPrice });
-                }
-            }
-        }
-        availableStock.sort((a, b) => b.stock - a.stock);
-        return availableStock;
-    } catch (err) { return []; }
-}
+      const fileRes = await fetch(`${TELEGRAM_API}/getFile?file_id=${document.file_id}`);
+      const fileData = await fileRes.json();
+      const filePath = fileData.result.file_path;
+      const downloadRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`);
+      const fileContent = await downloadRes.text();
 
-async function ensureUser(userId, from, env) {
-    if (!(await env.USERS_DB.get("usr:" + userId))) {
-        await env.USERS_DB.put("usr:" + userId, JSON.stringify({ name: from.first_name || "User", balance: 0.00 }));
+      const lines = fileContent.split(/\r?\n/);
+      const parsedAccounts = [];
+      for (let line of lines) {
+        const acc = parseAccountLine(line);
+        if (acc) parsedAccounts.push(acc);
+      }
+
+      if (parsedAccounts.length > 0) {
+        OUTLOOK_STORE.active = [...parsedAccounts, ...OUTLOOK_STORE.active];
+        const uploadText = 
+          `📂 <b>ACCOUNTS LOADED!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• <b>Added:</b> <code>${parsedAccounts.length}</code>\n` +
+          `• <b>Total Queue:</b> <code>${OUTLOOK_STORE.active.length}</code>`;
+        return send(chatId, uploadText, {
+          inline_keyboard: [
+            [{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }],
+            [{ text: "🏠 Home Menu", callback_data: "home" }]
+          ]
+        });
+      } else {
+        return send(chatId, "❌ No valid accounts found. Format: <code>email|password|token</code>");
+      }
+    } catch (err) {
+      return send(chatId, `❌ Error: ${err.message}`);
     }
+  }
+
+  // ============================================
+  //  HOME MENU
+  // ============================================
+
+  if (text === "/start" || data === "home") {
+    const welcome = 
+      `🛡️ <b>ALOKMAIL PRO X — FREE ENTERPRISE</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📧 Temp Mail + Outlook OTP + Web Dashboard\n\n` +
+      `• <b>Outlook Queue:</b> <code>${OUTLOOK_STORE.active.length}</code>\n` +
+      `• <b>Total OTPs:</b> <code>${STATS.totalOTPs}</code>\n\n` +
+      `👇 <i>Select an option:</i>`;
+
+    const kb = {
+      inline_keyboard: [
+        [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
+        [{ text: "📥 Outlook OTP", callback_data: "outlook_gen" }],
+        [{ text: "📂 Upload Accounts", callback_data: "upload_guide" }],
+        [
+          { text: "🌐 Switch Domain", callback_data: "domains" },
+          { text: "📜 Recent Inboxes", callback_data: "history" }
+        ],
+        [
+          { text: "📊 Web Dashboard", callback_data: "web_dashboard" },
+          { text: "👑 Admin Panel", callback_data: "admin_panel" }
+        ],
+        [{ text: "📖 Help", callback_data: "help" }]
+      ]
+    };
+    return messageId ? edit(chatId, messageId, welcome, kb) : send(chatId, welcome, kb);
+  }
+
+  // ============================================
+  //  WEB DASHBOARD LINK
+  // ============================================
+
+  if (data === "web_dashboard") {
+    const url = `https://${new URL(request.url).host}/dashboard`;
+    return edit(chatId, messageId,
+      `🌐 <b>WEB DASHBOARD</b>\n\n` +
+      `📊 Access real-time stats:\n<code>${url}</code>`,
+      {
+        inline_keyboard: [
+          [{ text: "🔗 Open Dashboard", url: url }],
+          [{ text: "🏠 Home Menu", callback_data: "home" }]
+        ]
+      }
+    );
+  }
+
+  // ============================================
+  //  UPLOAD GUIDE
+  // ============================================
+
+  if (data === "upload_guide") {
+    const uText = 
+      `📂 <b>UPLOAD OUTLOOK / HOTMAIL ACCOUNTS</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Send <code>.csv</code> or <code>.txt</code> file.\n\n` +
+      `📝 Format: <code>email|password|token</code>\n` +
+      `• Current Queue: <code>${OUTLOOK_STORE.active.length}</code>`;
+    return edit(chatId, messageId, uText, {
+      inline_keyboard: [
+        [{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }],
+        [{ text: "🏠 Home Menu", callback_data: "home" }]
+      ]
+    });
+  }
+
+  // ============================================
+  //  GENERATE OUTLOOK OTP
+  // ============================================
+
+  if (data === "outlook_gen") {
+    if (OUTLOOK_STORE.active.length === 0) {
+      return edit(chatId, messageId, `⚠️ <b>OUTLOOK QUEUE EMPTY!</b>\n\nUpload a CSV file first.`, {
+        inline_keyboard: [
+          [{ text: "📂 Upload Guide", callback_data: "upload_guide" }],
+          [{ text: "🏠 Home Menu", callback_data: "home" }]
+        ]
+      });
+    }
+
+    const acc = OUTLOOK_STORE.active.shift();
+    OUTLOOK_STORE.current = acc;
+
+    const outText = 
+      `📬 <b>OUTLOOK ACCOUNT READY</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <b>Email:</b> <code>${acc.email}</code>\n` +
+      `🔑 <b>Password:</b> <code>${acc.password}</code>\n\n` +
+      `📦 <b>Remaining:</b> <code>${OUTLOOK_STORE.active.length}</code>\n\n` +
+      `👇 <i>Press 'Fetch OTP' to check inbox.</i>`;
+
+    return edit(chatId, messageId, outText, {
+      inline_keyboard: [
+        [{ text: "📩 Fetch OTP", callback_data: "outlook_chk" }],
+        [
+          { text: "⏭️ Next Account", callback_data: "outlook_gen" },
+          { text: "📂 Upload More", callback_data: "upload_guide" }
+        ],
+        [{ text: "🏠 Home Menu", callback_data: "home" }]
+      ]
+    });
+  }
+
+  // ============================================
+  //  CHECK OUTLOOK OTP
+  // ============================================
+
+  if (data === "outlook_chk") {
+    const acc = OUTLOOK_STORE.current;
+    if (!acc) {
+      return edit(chatId, messageId, `⚠️ No active account. Generate one first!`, {
+        inline_keyboard: [
+          [{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }],
+          [{ text: "🏠 Home Menu", callback_data: "home" }]
+        ]
+      });
+    }
+
+    await send(chatId, "⏳ <i>Checking inbox for OTP...</i>");
+
+    const result = await fetchOutlookOtp(acc.email, acc.password, acc.token);
+
+    if (result.otp) {
+      OUTLOOK_STORE.expired.unshift(acc);
+      const successReport = 
+        `✅ <b>OTP RETRIEVED!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📧 <b>Email:</b> <code>${acc.email}</code>\n` +
+        `🔑 <b>OTP:</b> <code>${result.otp}</code>\n` +
+        `📝 <b>Subject:</b> <i>${escapeHtml(result.subject)}</i>\n` +
+        `📦 <i>Archived. Remaining: ${OUTLOOK_STORE.active.length}</i>`;
+
+      return edit(chatId, messageId, successReport, {
+        inline_keyboard: [
+          [{ text: `📋 Copy OTP: ${result.otp}`, callback_data: "dummy_otp" }],
+          [{ text: "🔄 Refresh Inbox", callback_data: "outlook_chk" }],
+          [{ text: "⏭️ Next Account", callback_data: "outlook_gen" }],
+          [{ text: "🏠 Home Menu", callback_data: "home" }]
+        ]
+      });
+    } else {
+      const errInfo = result.error ? `\n⚠️ <b>Status:</b> <code>${result.error}</code>` : "";
+      const report = 
+        `⏳ <b>WAITING FOR OTP...</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📧 <b>Email:</b> <code>${acc.email}</code>\n${errInfo}\n\n` +
+        `<i>Send verification code, wait 5s, tap refresh.</i>`;
+
+      return edit(chatId, messageId, report, {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh Inbox", callback_data: "outlook_chk" }],
+          [{ text: "⏭️ Skip to Next", callback_data: "outlook_gen" }],
+          [{ text: "🏠 Home Menu", callback_data: "home" }]
+        ]
+      });
+    }
+  }
+
+  // ============================================
+  //  GENERATE TEMP MAIL
+  // ============================================
+
+  if (data === "gen" || (data && data.startsWith("dgen_"))) {
+    const domainChoice = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
+    const mb = await createFastMailbox(domainChoice);
+
+    session.active = mb;
+    session.history = [mb.email, ...(session.history || []).filter(e => e !== mb.email)].slice(0, 5);
+    USER_STATE.set(userId, session);
+
+    const out = 
+      `📬 <b>TEMP MAIL READY</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <b>Email:</b> <code>${mb.email}</code>\n` +
+      `📡 <b>Relay:</b> <code>${mb.domain}</code>\n\n` +
+      `👇 <i>Press 'Fetch OTP' to check inbox.</i>`;
+
+    const token = `${mb.type}_${mb.user}_${mb.domain}_${mb.sid}`;
+    return edit(chatId, messageId, out, {
+      inline_keyboard: [
+        [{ text: "📩 Fetch OTP", callback_data: `chk_${token}` }],
+        [
+          { text: "🔄 Refresh", callback_data: `chk_${token}` },
+          { text: "⚡ New Mail", callback_data: "gen" }
+        ],
+        [
+          { text: "🌐 Switch Domain", callback_data: "domains" },
+          { text: "🏠 Home Menu", callback_data: "home" }
+        ]
+      ]
+    });
+  }
+
+  // ============================================
+  //  CHECK TEMP MAIL INBOX
+  // ============================================
+
+  if (data && data.startsWith("chk_")) {
+    const [, type, user, domain, sid] = data.split("_");
+    const activeEmail = `${user}@${domain}`;
+    const token = `${type}_${user}_${domain}_${sid}`;
+
+    const list = await fetchFastMessages(type, user, domain, sid);
+
+    if (!list || list.length === 0) {
+      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${activeEmail}</code>\n\n<i>No messages yet.</i>`, {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh Inbox", callback_data: `chk_${token}` }],
+          [
+            { text: "⚡ New Mail", callback_data: "gen" },
+            { text: "🏠 Home Menu", callback_data: "home" }
+          ]
+        ]
+      });
+    }
+
+    let report = `📬 <b>INBOX — ${list.length} MESSAGE(S)</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${activeEmail}</code>\n\n`;
+    let detectedOtp = null;
+
+    for (let i = 0; i < Math.min(list.length, 3); i++) {
+      const m = list[i];
+      const mailDetails = await fetchFastDetail(type, user, domain, sid, m.id);
+      const fullText = (mailDetails.subject || "") + " " + (mailDetails.body || "");
+      const otp = extractSmartOtp(fullText);
+      if (otp && !detectedOtp) detectedOtp = otp;
+
+      report += `📩 #${i+1} | 👤 <code>${escapeHtml(mailDetails.from)}</code>\n`;
+      report += `📝 ${escapeHtml(mailDetails.subject)}\n`;
+      if (otp) report += `🔑 <b>OTP:</b> <code>${otp}</code>\n`;
+      report += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    }
+
+    const kbRows = [];
+    if (detectedOtp) {
+      kbRows.push([{ text: `📋 Copy OTP: ${detectedOtp}`, callback_data: "dummy_otp" }]);
+    }
+    kbRows.push([{ text: "🔄 Refresh Inbox", callback_data: `chk_${token}` }]);
+    kbRows.push([
+      { text: "⚡ New Mail", callback_data: "gen" },
+      { text: "🏠 Home Menu", callback_data: "home" }
+    ]);
+
+    return edit(chatId, messageId, report, { inline_keyboard: kbRows });
+  }
+
+  // ============================================
+  //  DOMAINS
+  // ============================================
+
+  if (data === "domains") {
+    const dMsg = `🌐 <b>SELECT DOMAIN</b>\n━━━━━━━━━━━━━━━━━━━━━━\nPick a domain for your mailbox:`;
+    const rows = [];
+    for (let i = 0; i < DOMAINS.length; i += 2) {
+      const row = [{ text: `@${DOMAINS[i]}`, callback_data: `dgen_${DOMAINS[i]}` }];
+      if (DOMAINS[i + 1]) row.push({ text: `@${DOMAINS[i + 1]}`, callback_data: `dgen_${DOMAINS[i + 1]}` });
+      rows.push(row);
+    }
+    rows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
+    return edit(chatId, messageId, dMsg, { inline_keyboard: rows });
+  }
+
+  // ============================================
+  //  HISTORY
+  // ============================================
+
+  if (data === "history") {
+    const list = session.history || [];
+    let hMsg = `📜 <b>RECENT INBOXES</b>\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    if (list.length === 0) {
+      hMsg += `<i>No recent inboxes.</i>`;
+    } else {
+      list.forEach((e, idx) => {
+        hMsg += `${idx + 1}. <code>${e}</code>\n`;
+      });
+    }
+    return edit(chatId, messageId, hMsg, {
+      inline_keyboard: [
+        [{ text: "⚡ Generate Fresh", callback_data: "gen" }],
+        [{ text: "🏠 Home Menu", callback_data: "home" }]
+      ]
+    });
+  }
+
+  // ============================================
+  //  HELP
+  // ============================================
+
+  if (data === "help") {
+    const hText = 
+      `📖 <b>HOW TO USE</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `1️⃣ <b>Temp Mail:</b> Tap 'Generate Temp Mail'\n` +
+      `2️⃣ <b>Outlook OTP:</b> Upload CSV → Generate → Fetch\n` +
+      `3️⃣ <b>Web Dashboard:</b> Tap 'Web Dashboard' for stats`;
+    return edit(chatId, messageId, hText, {
+      inline_keyboard: [[{ text: "🏠 Home Menu", callback_data: "home" }]]
+    });
+  }
+
+  // ============================================
+  //  ADMIN PANEL
+  // ============================================
+
+  if (text === "/admin" || data === "admin_panel") {
+    if (userId !== OWNER_ID) {
+      return send(chatId, "❌ Access Denied.");
+    }
+
+    const aText = 
+      `👑 <b>ADMIN DASHBOARD</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• Active Queue: <code>${OUTLOOK_STORE.active.length}</code>\n` +
+      `• Archived: <code>${OUTLOOK_STORE.expired.length}</code>\n` +
+      `• Total OTPs: <code>${STATS.totalOTPs}</code>\n` +
+      `• Users: <code>${USER_STATE.size}</code>`;
+
+    const kb = {
+      inline_keyboard: [
+        [{ text: "📁 Export Active", callback_data: "export_active" }],
+        [{ text: "📦 Export Used", callback_data: "export_used" }],
+        [{ text: "🗑️ Clear Queue", callback_data: "clear_queue" }],
+        [{ text: "🏠 Home Menu", callback_data: "home" }]
+      ]
+    };
+    return messageId ? edit(chatId, messageId, aText, kb) : send(chatId, aText, kb);
+  }
+
+  // ============================================
+  //  ADMIN EXPORTS
+  // ============================================
+
+  if (data === "export_active" && userId === OWNER_ID) {
+    const textData = OUTLOOK_STORE.active.map(a => a.raw).join("\n") || "No active accounts.";
+    return sendDocument(chatId, textData, "active_accounts.txt", "📁 Active Accounts");
+  }
+
+  if (data === "export_used" && userId === OWNER_ID) {
+    const textData = OUTLOOK_STORE.expired.map(a => a.raw).join("\n") || "No used accounts.";
+    return sendDocument(chatId, textData, "used_accounts.txt", "📦 Used Accounts");
+  }
+
+  if (data === "clear_queue" && userId === OWNER_ID) {
+    OUTLOOK_STORE.active = [];
+    return edit(chatId, messageId, "🗑️ Queue cleared.", {
+      inline_keyboard: [[{ text: "👑 Admin Panel", callback_data: "admin_panel" }]]
+    });
+  }
+
+  // Fallback
+  if (data) {
+    return edit(chatId, messageId, "⚠️ Action not recognized.", {
+      inline_keyboard: [[{ text: "🏠 Home Menu", callback_data: "home" }]]
+    });
+  }
 }
 
-async function getUser(userId, env) {
-    const data = await env.USERS_DB.get("usr:" + userId);
-    return data ? JSON.parse(data) : { balance: 0.00 };
+// ============================================
+//  TELEGRAM HELPERS
+// ============================================
+
+async function send(chatId, text, kb = null) {
+  const p = { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true };
+  if (kb) p.reply_markup = kb;
+  return fetch(`${TELEGRAM_API}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
 }
 
-async function adjustBalance(userId, delta, env) {
-    const user = await getUser(userId, env);
-    user.balance = Math.max(0, parseFloat((user.balance + delta).toFixed(2)));
-    await env.USERS_DB.put("usr:" + userId, JSON.stringify(user));
-    return user.balance;
+async function edit(chatId, msgId, text, kb = null) {
+  const p = { chat_id: chatId, message_id: msgId, text, parse_mode: "HTML", disable_web_page_preview: true };
+  if (kb) p.reply_markup = kb;
+  const res = await fetch(`${TELEGRAM_API}/editMessageText`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    if (err?.description?.includes("message is not modified")) return res;
+    return send(chatId, text, kb);
+  }
+  return res;
 }
 
-async function sendTgMessage(chatId, text, reply_markup = null) {
-    const body = { chat_id: chatId, text: text, parse_mode: "Markdown" };
-    if (reply_markup) body.reply_markup = reply_markup;
-    await fetch("https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function sendDocument(chatId, content, filename, caption) {
+  const formData = new FormData();
+  formData.append("chat_id", chatId);
+  formData.append("caption", caption);
+  formData.append("parse_mode", "HTML");
+  formData.append("document", new Blob([content], { type: "text/plain" }), filename);
+  return fetch(`${TELEGRAM_API}/sendDocument`, { method: "POST", body: formData });
 }

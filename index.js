@@ -1,7 +1,7 @@
 /**
  * ============================================
- *  ALOKMAIL PRO X — ENTERPRISE ENGINE (FREE)
- *  Temp Mail (Guerrilla + 1SecMail) + Outlook CSV Queue + Full Admin Suite
+ *  ALOKMAIL PRO X — LONGVAN OTP INTEGRATION
+ *  Temp Mail + Outlook Queue + LongVan OTP + Web Dashboard
  *  Platform: Cloudflare Workers
  *  Owner ID: 8452322818
  * ============================================
@@ -10,6 +10,15 @@
 const BOT_TOKEN = "8759442095:AAGCsqImU2IssXIvPIs-2Mdc1vZcdw92UDI";
 const OWNER_ID = "8452322818";
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+
+// ============================================
+//  LONGVAN SDK CONFIG
+// ============================================
+
+const LONGVAN_CONFIG = {
+  apiKey: "2Vwu7ROX0jNK7J00kbo5fnhxw",
+  baseUrl: "https://api.longvan.com/v1", // Replace with actual base URL
+};
 
 // ============================================
 //  GLOBAL STORES
@@ -30,41 +39,128 @@ const STATS = {
 };
 
 // ============================================
-//  NAME POOLS & DOMAINS
+//  LONGVAN OTP FUNCTIONS
 // ============================================
 
-const NAME_POOL = [
-  'priya', 'sneha', 'pooja', 'ananya', 'riya', 'kavya', 'tanvi', 'shreya',
-  'divya', 'aditi', 'simran', 'megha', 'ishita', 'muskan', 'radhika', 'neha',
-  'kritika', 'anjali', 'bhavna', 'chahat', 'deepika', 'esha', 'falguni', 'gauri',
-  'hina', 'isha', 'jiya', 'kiran', 'lavanya', 'mahi', 'nandini', 'oviya',
-  'palak', 'qandeel', 'ritika', 'sanya', 'trisha', 'urvi', 'vidhi', 'yashika',
-  'alok', 'rahul', 'rohit', 'amit', 'vikas', 'arjun', 'varun', 'karan',
-  'sahil', 'manish', 'aakash', 'dev', 'ayush', 'yash', 'nikhil', 'harsh',
-  'aditya', 'bhavesh', 'chirag', 'dhruv', 'eshan', 'faisal', 'gaurav', 'himanshu'
-];
+async function sendLongVanOTP(phone) {
+  try {
+    const response = await fetch(`${LONGVAN_CONFIG.baseUrl}/auth/otp/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': LONGVAN_CONFIG.apiKey
+      },
+      body: JSON.stringify({ phone })
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
 
-const ADJECTIVE_POOL = [
-  'swift', 'cool', 'smart', 'bold', 'shiny', 'quiet', 'brave', 'lucky',
-  'royal', 'urban', 'silent', 'rapid', 'prime', 'sunny', 'noble', 'crisp',
-  'vivid', 'chill', 'sharp', 'fresh', 'stellar', 'lively', 'breezy', 'golden'
-];
+async function validateLongVanOTP(phone, code) {
+  try {
+    const response = await fetch(`${LONGVAN_CONFIG.baseUrl}/auth/otp/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': LONGVAN_CONFIG.apiKey
+      },
+      body: JSON.stringify({ phone, code })
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
 
-const DOMAINS = [
-  'sharklasers.com', 'guerrillamail.com', 'guerrillamailblock.com', 'spam4.me',
-  'pokemail.net', '1secmail.com', '1secmail.org', '1secmail.net'
-];
+async function getLongVanTokenByOTP(phone, code) {
+  try {
+    const response = await fetch(`${LONGVAN_CONFIG.baseUrl}/auth/token/otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': LONGVAN_CONFIG.apiKey
+      },
+      body: JSON.stringify({ phone, code })
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
+
+// ============================================
+//  OUTLOOK OTP FUNCTIONS (with token refresh)
+// ============================================
+
+async function fetchOutlookOtp(email, password, token) {
+  // Try with existing token
+  let result = await callOutlookAPI(email, token);
+  
+  // If token expired, refresh it
+  if (result.error && result.error.includes("expired")) {
+    const newToken = await refreshOutlookToken(email, password);
+    if (newToken) {
+      if (OUTLOOK_STORE.current) {
+        OUTLOOK_STORE.current.token = newToken;
+      }
+      result = await callOutlookAPI(email, newToken);
+    }
+  }
+  return result;
+}
+
+async function callOutlookAPI(email, token) {
+  try {
+    const res = await fetch(`https://outlook.office365.com/api/v2.0/me/messages`, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+    if (!res.ok) return { error: "Token expired or invalid auth", otp: null };
+    const data = await res.json();
+    const messages = data.value || [];
+    if (messages.length === 0) return { otp: null, subject: "No messages found" };
+
+    const latest = messages[0];
+    const fullContent = (latest.Subject || "") + " " + (latest.BodyPreview || "");
+    const otp = extractSmartOtp(fullContent);
+    if (otp) STATS.totalOTPs++;
+    return { otp, subject: latest.Subject, from: latest.From?.EmailAddress?.Address || "Outlook Service" };
+  } catch (e) {
+    return { error: "Network error", otp: null };
+  }
+}
+
+async function refreshOutlookToken(email, password) {
+  try {
+    const res = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: 'YOUR_CLIENT_ID',
+        client_secret: 'YOUR_CLIENT_SECRET',
+        grant_type: 'password',
+        username: email,
+        password: password,
+        scope: 'https://graph.microsoft.com/Mail.Read'
+      })
+    });
+    const data = await res.json();
+    return data.access_token || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // ============================================
 //  UTILITY FUNCTIONS
 // ============================================
-
-function getRandomUser() {
-  const adj = ADJECTIVE_POOL[Math.floor(Math.random() * ADJECTIVE_POOL.length)];
-  const name = NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)];
-  const num = Math.floor(1000 + Math.random() * 9000);
-  return `${adj}${name.charAt(0).toUpperCase() + name.slice(1)}${num}`.toLowerCase();
-}
 
 function extractSmartOtp(text) {
   if (!text) return null;
@@ -99,112 +195,49 @@ function escapeHtml(str) {
   return (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// ============================================
-//  EMAIL API FUNCTIONS
-// ============================================
+function getRandomUser() {
+  const names = ['priya', 'sneha', 'pooja', 'ananya', 'riya', 'kavya', 'tanvi', 'shreya', 'alok', 'rahul', 'rohit', 'amit', 'vikas', 'arjun', 'varun', 'karan', 'sahil', 'manish', 'aakash', 'dev', 'ayush', 'yash', 'nikhil', 'harsh'];
+  const adj = ['swift', 'cool', 'smart', 'bold', 'shiny', 'quiet', 'brave', 'lucky', 'royal', 'urban', 'silent', 'rapid', 'prime', 'sunny', 'noble', 'crisp', 'vivid', 'chill', 'sharp', 'fresh', 'stellar', 'lively', 'breezy', 'golden'];
+  const a = adj[Math.floor(Math.random() * adj.length)];
+  const n = names[Math.floor(Math.random() * names.length)];
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `${a}${n.charAt(0).toUpperCase() + n.slice(1)}${num}`.toLowerCase();
+}
 
-async function createFastMailbox(domainChoice = null, customUser = null) {
-  const user = customUser || getRandomUser();
+const DOMAINS = ['sharklasers.com', 'guerrillamail.com', 'guerrillamailblock.com', 'spam4.me', 'pokemail.net', '1secmail.com', '1secmail.org', '1secmail.net'];
+
+async function createFastMailbox(domainChoice = null) {
+  const user = getRandomUser();
   const domain = domainChoice || DOMAINS[Math.floor(Math.random() * DOMAINS.length)];
-  const isGuerrilla = !domain.includes('1secmail');
-
-  if (isGuerrilla) {
-    try {
-      const initRes = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address');
-      const initData = await initRes.json();
-      const sid = initData.sid_token;
-
-      const setRes = await fetch(`https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`);
-      const setData = await setRes.json();
-      const email = (setData.email_addr || `${user}@${domain}`).toLowerCase();
-      STATS.totalEmails++;
-      return { type: 'g', email, user, domain, sid };
-    } catch (e) {
-      STATS.totalEmails++;
-      return { type: 's', email: `${user}@1secmail.com`, user, domain: '1secmail.com', sid: '0' };
-    }
-  } else {
-    STATS.totalEmails++;
-    return { type: 's', email: `${user}@${domain}`, user, domain, sid: '0' };
-  }
+  STATS.totalEmails++;
+  return { type: 's', email: `${user}@${domain}`, user, domain, sid: '0' };
 }
 
 async function fetchFastMessages(type, user, domain, sid) {
-  if (type === 'g' && sid !== '0') {
-    try {
-      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${sid}`);
-      const data = await res.json();
-      return (data.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com').map(m => ({
-        id: m.mail_id,
-        from: m.mail_from,
-        subject: m.mail_subject || '(No Subject)'
-      }));
-    } catch (e) {
-      return [];
-    }
-  } else {
-    try {
-      const res = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${encodeURIComponent(user)}&domain=${encodeURIComponent(domain)}`);
-      return await res.json();
-    } catch (e) {
-      return [];
-    }
+  try {
+    const res = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${encodeURIComponent(user)}&domain=${encodeURIComponent(domain)}`);
+    return await res.json();
+  } catch (e) {
+    return [];
   }
 }
 
 async function fetchFastDetail(type, user, domain, sid, id) {
-  if (type === 'g' && sid !== '0') {
-    try {
-      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${id}&sid_token=${sid}`);
-      const mail = await res.json();
-      return {
-        from: mail.mail_from || 'Unknown',
-        subject: mail.mail_subject || '(No Subject)',
-        body: mail.mail_body || mail.mail_excerpt || ''
-      };
-    } catch (e) {
-      return { from: 'Unknown', subject: '', body: '' };
-    }
-  } else {
-    try {
-      const res = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${encodeURIComponent(user)}&domain=${encodeURIComponent(domain)}&id=${encodeURIComponent(id)}`);
-      const mail = await res.json();
-      return {
-        from: mail.from || 'Unknown',
-        subject: mail.subject || '(No Subject)',
-        body: mail.textBody || mail.htmlBody || ''
-      };
-    } catch (e) {
-      return { from: 'Unknown', subject: '', body: '' };
-    }
-  }
-}
-
-async function fetchOutlookOtp(email, password, token) {
   try {
-    const res = await fetch(`https://outlook.office365.com/api/v2.0/me/messages`, {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      }
-    });
-    if (!res.ok) return { error: "Token expired or invalid auth", otp: null };
-    const data = await res.json();
-    const messages = data.value || [];
-    if (messages.length === 0) return { otp: null, subject: "No messages found in Inbox" };
-
-    const latest = messages[0];
-    const fullContent = (latest.Subject || "") + " " + (latest.BodyPreview || "");
-    const otp = extractSmartOtp(fullContent);
-    if (otp) STATS.totalOTPs++;
-    return { otp, subject: latest.Subject, from: latest.From?.EmailAddress?.Address || "Outlook Service" };
+    const res = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${encodeURIComponent(user)}&domain=${encodeURIComponent(domain)}&id=${encodeURIComponent(id)}`);
+    const mail = await res.json();
+    return {
+      from: mail.from || 'Unknown',
+      subject: mail.subject || '(No Subject)',
+      body: mail.textBody || mail.htmlBody || ''
+    };
   } catch (e) {
-    return { error: "Network connection error with server", otp: null };
+    return { from: 'Unknown', subject: '', body: '' };
   }
 }
 
 // ============================================
-//  WEB DASHBOARD HANDLER
+//  WEB DASHBOARD
 // ============================================
 
 async function handleWebDashboard(request) {
@@ -213,50 +246,21 @@ async function handleWebDashboard(request) {
     const html = `
     <!DOCTYPE html>
     <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>AlokMail Pro — Dashboard</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; }
-        body { background: #0f0f1a; color: #e0e0e0; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        h1 { font-size: 2rem; color: #6C63FF; margin-bottom: 20px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 30px; }
-        .stat-card { background: #1a1a2e; border: 1px solid #2a2a4e; border-radius: 12px; padding: 20px; text-align: center; }
-        .stat-card h3 { font-size: 2rem; color: #6C63FF; }
-        .stat-card p { color: #888; font-size: 0.85rem; margin-top: 4px; }
-        .section-title { font-size: 1.1rem; margin: 24px 0 12px; color: #aaa; }
-        .footer { margin-top: 30px; text-align: center; color: #555; font-size: 0.8rem; }
-        .badge { display: inline-block; background: #6C63FF; color: white; padding: 2px 12px; border-radius: 20px; font-size: 0.7rem; margin-left: 8px; }
-        .online { color: #4CAF50; }
-        .log-list { background: #1a1a2e; border-radius: 12px; padding: 12px; max-height: 300px; overflow-y: auto; }
-        .log-item { padding: 6px 10px; border-bottom: 1px solid #2a2a4e; font-size: 0.85rem; }
-        .log-item .time { color: #666; margin-right: 10px; }
-        .type-email { color: #6C63FF; }
-        .type-otp { color: #4CAF50; }
-        .type-outlook { color: #FF6B6B; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h1>🛡️ AlokMail Pro <span class="badge">Enterprise</span></h1>
-        <div class="stats-grid">
-          <div class="stat-card"><h3>${STATS.totalEmails}</h3><p>Total Emails</p></div>
-          <div class="stat-card"><h3>${STATS.totalOTPs}</h3><p>Total OTPs</p></div>
-          <div class="stat-card"><h3>${USER_STATE.size}</h3><p>Active Users</p></div>
-          <div class="stat-card"><h3>${OUTLOOK_STORE.active.length}</h3><p>Outlook Queue</p></div>
-          <div class="stat-card"><h3>${Math.floor((Date.now() - STATS.startTime) / 86400000)}d</h3><p>Uptime</p></div>
-        </div>
-        <div class="section-title">📋 System Logs</div>
-        <div class="log-list">
-          <div class="log-item"><span class="time">🟢</span> <span class="type-email">Email</span> System initialized</div>
-          <div class="log-item"><span class="time">🟢</span> <span class="type-outlook">Outlook</span> Queue: ${OUTLOOK_STORE.active.length} accounts</div>
-        </div>
-        <div class="footer">AlokMail Pro X — Free Enterprise Engine • Cloudflare Workers</div>
-      </div>
-    </body>
-    </html>
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlokMail Pro — Dashboard</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,sans-serif}body{background:#0f0f1a;color:#e0e0e0;padding:20px}.container{max-width:1200px;margin:0 auto}h1{font-size:2rem;color:#6C63FF;margin-bottom:20px}.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:30px}.stat-card{background:#1a1a2e;border:1px solid #2a2a4e;border-radius:12px;padding:20px;text-align:center}.stat-card h3{font-size:2rem;color:#6C63FF}.stat-card p{color:#888;font-size:0.85rem;margin-top:4px}.badge{display:inline-block;background:#6C63FF;color:#fff;padding:2px 12px;border-radius:20px;font-size:0.7rem;margin-left:8px}.online{color:#4CAF50}.footer{margin-top:30px;text-align:center;color:#555;font-size:0.8rem}
+    </style></head>
+    <body><div class="container">
+    <h1>🛡️ AlokMail Pro <span class="badge">Enterprise</span></h1>
+    <div class="stats-grid">
+    <div class="stat-card"><h3>${STATS.totalEmails}</h3><p>Total Emails</p></div>
+    <div class="stat-card"><h3>${STATS.totalOTPs}</h3><p>Total OTPs</p></div>
+    <div class="stat-card"><h3>${USER_STATE.size}</h3><p>Active Users</p></div>
+    <div class="stat-card"><h3>${OUTLOOK_STORE.active.length}</h3><p>Outlook Queue</p></div>
+    <div class="stat-card"><h3>${Math.floor((Date.now() - STATS.startTime) / 86400000)}d</h3><p>Uptime</p></div>
+    </div>
+    <div class="footer">AlokMail Pro X — Powered by Cloudflare Workers • LongVan OTP + Outlook</div>
+    </div></body></html>
     `;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
   }
@@ -330,13 +334,11 @@ async function handleTelegramUpdate(update) {
 
       if (parsedAccounts.length > 0) {
         OUTLOOK_STORE.active = [...parsedAccounts, ...OUTLOOK_STORE.active];
-        const uploadText = 
-          `📂 <b>ACCOUNTS LOADED!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `• <b>Added:</b> <code>${parsedAccounts.length}</code>\n` +
-          `• <b>Total Queue:</b> <code>${OUTLOOK_STORE.active.length}</code>`;
+        const uploadText = `📂 <b>ACCOUNTS LOADED!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n• <b>Added:</b> <code>${parsedAccounts.length}</code>\n• <b>Total Queue:</b> <code>${OUTLOOK_STORE.active.length}</code>`;
         return send(chatId, uploadText, {
           inline_keyboard: [
             [{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }],
+            [{ text: "📱 LongVan OTP", callback_data: "longvan" }],
             [{ text: "🏠 Home Menu", callback_data: "home" }]
           ]
         });
@@ -354,9 +356,8 @@ async function handleTelegramUpdate(update) {
 
   if (text === "/start" || data === "home") {
     const welcome = 
-      `🛡️ <b>ALOKMAIL PRO X — FREE ENTERPRISE</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `📧 Temp Mail + Outlook OTP + Web Dashboard\n\n` +
+      `🛡️ <b>ALOKMAIL PRO X — ENTERPRISE HUB</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📧 Temp Mail + Outlook OTP + LongVan OTP\n\n` +
       `• <b>Outlook Queue:</b> <code>${OUTLOOK_STORE.active.length}</code>\n` +
       `• <b>Total OTPs:</b> <code>${STATS.totalOTPs}</code>\n\n` +
       `👇 <i>Select an option:</i>`;
@@ -365,15 +366,11 @@ async function handleTelegramUpdate(update) {
       inline_keyboard: [
         [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
         [{ text: "📥 Outlook OTP", callback_data: "outlook_gen" }],
+        [{ text: "📱 LongVan OTP", callback_data: "longvan" }],
         [{ text: "📂 Upload Accounts", callback_data: "upload_guide" }],
-        [
-          { text: "🌐 Switch Domain", callback_data: "domains" },
-          { text: "📜 Recent Inboxes", callback_data: "history" }
-        ],
-        [
-          { text: "📊 Web Dashboard", callback_data: "web_dashboard" },
-          { text: "👑 Admin Panel", callback_data: "admin_panel" }
-        ],
+        [{ text: "🌐 Switch Domain", callback_data: "domains" }],
+        [{ text: "📊 Web Dashboard", callback_data: "web_dashboard" }],
+        [{ text: "👑 Admin Panel", callback_data: "admin_panel" }],
         [{ text: "📖 Help", callback_data: "help" }]
       ]
     };
@@ -381,53 +378,87 @@ async function handleTelegramUpdate(update) {
   }
 
   // ============================================
-  //  WEB DASHBOARD LINK
+  //  LONGVAN OTP HANDLER
   // ============================================
 
-  if (data === "web_dashboard") {
-    const url = `https://${new URL(request.url).host}/dashboard`;
+  if (data === "longvan") {
     return edit(chatId, messageId,
-      `🌐 <b>WEB DASHBOARD</b>\n\n` +
-      `📊 Access real-time stats:\n<code>${url}</code>`,
+      `📱 <b>LONGVAN OTP SERVICE</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Enter phone number with country code (without +):\n` +
+      `<i>Example: 84123456789</i>`,
       {
         inline_keyboard: [
-          [{ text: "🔗 Open Dashboard", url: url }],
-          [{ text: "🏠 Home Menu", callback_data: "home" }]
+          [{ text: "🔙 Back to Home", callback_data: "home" }]
         ]
       }
     );
   }
 
-  // ============================================
-  //  UPLOAD GUIDE
-  // ============================================
+  // Handle LongVan phone input (text message)
+  if (text && text.match(/^\d{9,15}$/)) {
+    const phone = text;
+    const result = await sendLongVanOTP(phone);
+    if (result.success) {
+      return send(chatId,
+        `✅ <b>OTP SENT!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📱 Phone: <code>${phone}</code>\n` +
+        `⏳ Please enter the OTP code you received.`,
+        {
+          inline_keyboard: [
+            [{ text: "📋 Enter OTP Code", callback_data: `longvan_validate_${phone}` }],
+            [{ text: "🔙 Back to Home", callback_data: "home" }]
+          ]
+        }
+      );
+    } else {
+      return send(chatId, `❌ Failed to send OTP: ${result.message}`);
+    }
+  }
 
-  if (data === "upload_guide") {
-    const uText = 
-      `📂 <b>UPLOAD OUTLOOK / HOTMAIL ACCOUNTS</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Send <code>.csv</code> or <code>.txt</code> file.\n\n` +
-      `📝 Format: <code>email|password|token</code>\n` +
-      `• Current Queue: <code>${OUTLOOK_STORE.active.length}</code>`;
-    return edit(chatId, messageId, uText, {
-      inline_keyboard: [
-        [{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }],
-        [{ text: "🏠 Home Menu", callback_data: "home" }]
-      ]
-    });
+  // Handle LongVan OTP validation (callback)
+  if (data && data.startsWith("longvan_validate_")) {
+    const phone = data.replace("longvan_validate_", "");
+    return edit(chatId, messageId,
+      `📱 <b>ENTER OTP CODE</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Phone: <code>${phone}</code>\n\n` +
+      `<i>Send the OTP code as a message.</i>`,
+      {
+        inline_keyboard: [
+          [{ text: "🔙 Back to Home", callback_data: "home" }]
+        ]
+      }
+    );
+  }
+
+  // Handle LongVan OTP code input (text message)  
+  if (text && text.match(/^\d{4,8}$/)) {
+    // Check if we have a pending phone number
+    const phone = USER_STATE.get(userId)?.pendingPhone || null;
+    if (phone) {
+      const result = await validateLongVanOTP(phone, text);
+      if (result.success) {
+        // Get token from OTP
+        const tokenResult = await getLongVanTokenByOTP(phone, text);
+        return send(chatId,
+          `✅ <b>OTP VALIDATED!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `📱 Phone: <code>${phone}</code>\n` +
+          `🔑 <b>Access Token:</b> <code>${tokenResult.accessToken || 'Generated'}</code>`,
+          { inline_keyboard: [[{ text: "🏠 Home Menu", callback_data: "home" }]] }
+        );
+      } else {
+        return send(chatId, `❌ Invalid OTP: ${result.message}`);
+      }
+    }
   }
 
   // ============================================
-  //  GENERATE OUTLOOK OTP
+  //  OUTLOOK GENERATE
   // ============================================
 
   if (data === "outlook_gen") {
     if (OUTLOOK_STORE.active.length === 0) {
       return edit(chatId, messageId, `⚠️ <b>OUTLOOK QUEUE EMPTY!</b>\n\nUpload a CSV file first.`, {
-        inline_keyboard: [
-          [{ text: "📂 Upload Guide", callback_data: "upload_guide" }],
-          [{ text: "🏠 Home Menu", callback_data: "home" }]
-        ]
+        inline_keyboard: [[{ text: "📂 Upload Guide", callback_data: "upload_guide" }], [{ text: "🏠 Home Menu", callback_data: "home" }]]
       });
     }
 
@@ -444,27 +475,21 @@ async function handleTelegramUpdate(update) {
     return edit(chatId, messageId, outText, {
       inline_keyboard: [
         [{ text: "📩 Fetch OTP", callback_data: "outlook_chk" }],
-        [
-          { text: "⏭️ Next Account", callback_data: "outlook_gen" },
-          { text: "📂 Upload More", callback_data: "upload_guide" }
-        ],
+        [{ text: "⏭️ Next Account", callback_data: "outlook_gen" }],
         [{ text: "🏠 Home Menu", callback_data: "home" }]
       ]
     });
   }
 
   // ============================================
-  //  CHECK OUTLOOK OTP
+  //  OUTLOOK CHECK OTP
   // ============================================
 
   if (data === "outlook_chk") {
     const acc = OUTLOOK_STORE.current;
     if (!acc) {
-      return edit(chatId, messageId, `⚠️ No active account. Generate one first!`, {
-        inline_keyboard: [
-          [{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }],
-          [{ text: "🏠 Home Menu", callback_data: "home" }]
-        ]
+      return edit(chatId, messageId, `⚠️ No active account.`, {
+        inline_keyboard: [[{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }], [{ text: "🏠 Home Menu", callback_data: "home" }]]
       });
     }
 
@@ -484,7 +509,6 @@ async function handleTelegramUpdate(update) {
       return edit(chatId, messageId, successReport, {
         inline_keyboard: [
           [{ text: `📋 Copy OTP: ${result.otp}`, callback_data: "dummy_otp" }],
-          [{ text: "🔄 Refresh Inbox", callback_data: "outlook_chk" }],
           [{ text: "⏭️ Next Account", callback_data: "outlook_gen" }],
           [{ text: "🏠 Home Menu", callback_data: "home" }]
         ]
@@ -507,7 +531,7 @@ async function handleTelegramUpdate(update) {
   }
 
   // ============================================
-  //  GENERATE TEMP MAIL
+  //  TEMP MAIL GENERATE
   // ============================================
 
   if (data === "gen" || (data && data.startsWith("dgen_"))) {
@@ -528,14 +552,10 @@ async function handleTelegramUpdate(update) {
     return edit(chatId, messageId, out, {
       inline_keyboard: [
         [{ text: "📩 Fetch OTP", callback_data: `chk_${token}` }],
-        [
-          { text: "🔄 Refresh", callback_data: `chk_${token}` },
-          { text: "⚡ New Mail", callback_data: "gen" }
-        ],
-        [
-          { text: "🌐 Switch Domain", callback_data: "domains" },
-          { text: "🏠 Home Menu", callback_data: "home" }
-        ]
+        [{ text: "🔄 Refresh", callback_data: `chk_${token}` }],
+        [{ text: "⚡ New Mail", callback_data: "gen" }],
+        [{ text: "🌐 Switch Domain", callback_data: "domains" }],
+        [{ text: "🏠 Home Menu", callback_data: "home" }]
       ]
     });
   }
@@ -555,10 +575,8 @@ async function handleTelegramUpdate(update) {
       return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${activeEmail}</code>\n\n<i>No messages yet.</i>`, {
         inline_keyboard: [
           [{ text: "🔄 Refresh Inbox", callback_data: `chk_${token}` }],
-          [
-            { text: "⚡ New Mail", callback_data: "gen" },
-            { text: "🏠 Home Menu", callback_data: "home" }
-          ]
+          [{ text: "⚡ New Mail", callback_data: "gen" }],
+          [{ text: "🏠 Home Menu", callback_data: "home" }]
         ]
       });
     }
@@ -584,10 +602,8 @@ async function handleTelegramUpdate(update) {
       kbRows.push([{ text: `📋 Copy OTP: ${detectedOtp}`, callback_data: "dummy_otp" }]);
     }
     kbRows.push([{ text: "🔄 Refresh Inbox", callback_data: `chk_${token}` }]);
-    kbRows.push([
-      { text: "⚡ New Mail", callback_data: "gen" },
-      { text: "🏠 Home Menu", callback_data: "home" }
-    ]);
+    kbRows.push([{ text: "⚡ New Mail", callback_data: "gen" }]);
+    kbRows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
 
     return edit(chatId, messageId, report, { inline_keyboard: kbRows });
   }
@@ -609,40 +625,33 @@ async function handleTelegramUpdate(update) {
   }
 
   // ============================================
-  //  HISTORY
+  //  UPLOAD GUIDE
   // ============================================
 
-  if (data === "history") {
-    const list = session.history || [];
-    let hMsg = `📜 <b>RECENT INBOXES</b>\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-    if (list.length === 0) {
-      hMsg += `<i>No recent inboxes.</i>`;
-    } else {
-      list.forEach((e, idx) => {
-        hMsg += `${idx + 1}. <code>${e}</code>\n`;
-      });
-    }
-    return edit(chatId, messageId, hMsg, {
+  if (data === "upload_guide") {
+    const uText = 
+      `📂 <b>UPLOAD OUTLOOK / HOTMAIL ACCOUNTS</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Send <code>.csv</code> or <code>.txt</code> file.\n\n` +
+      `📝 Format: <code>email|password|token</code>\n` +
+      `• Current Queue: <code>${OUTLOOK_STORE.active.length}</code>`;
+    return edit(chatId, messageId, uText, {
       inline_keyboard: [
-        [{ text: "⚡ Generate Fresh", callback_data: "gen" }],
+        [{ text: "⚡ Generate Outlook OTP", callback_data: "outlook_gen" }],
         [{ text: "🏠 Home Menu", callback_data: "home" }]
       ]
     });
   }
 
   // ============================================
-  //  HELP
+  //  WEB DASHBOARD LINK
   // ============================================
 
-  if (data === "help") {
-    const hText = 
-      `📖 <b>HOW TO USE</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `1️⃣ <b>Temp Mail:</b> Tap 'Generate Temp Mail'\n` +
-      `2️⃣ <b>Outlook OTP:</b> Upload CSV → Generate → Fetch\n` +
-      `3️⃣ <b>Web Dashboard:</b> Tap 'Web Dashboard' for stats`;
-    return edit(chatId, messageId, hText, {
-      inline_keyboard: [[{ text: "🏠 Home Menu", callback_data: "home" }]]
-    });
+  if (data === "web_dashboard") {
+    const url = `https://${new URL(request.url).host}/dashboard`;
+    return edit(chatId, messageId,
+      `🌐 <b>WEB DASHBOARD</b>\n\n📊 Access real-time stats:\n<code>${url}</code>`,
+      { inline_keyboard: [[{ text: "🔗 Open Dashboard", url: url }], [{ text: "🏠 Home Menu", callback_data: "home" }]] }
+    );
   }
 
   // ============================================
@@ -650,9 +659,7 @@ async function handleTelegramUpdate(update) {
   // ============================================
 
   if (text === "/admin" || data === "admin_panel") {
-    if (userId !== OWNER_ID) {
-      return send(chatId, "❌ Access Denied.");
-    }
+    if (userId !== OWNER_ID) return send(chatId, "❌ Access Denied.");
 
     const aText = 
       `👑 <b>ADMIN DASHBOARD</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -693,7 +700,26 @@ async function handleTelegramUpdate(update) {
     });
   }
 
-  // Fallback
+  // ============================================
+  //  HELP
+  // ============================================
+
+  if (data === "help") {
+    const hText = 
+      `📖 <b>HOW TO USE</b>\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `1️⃣ <b>Temp Mail:</b> Tap 'Generate Temp Mail'\n` +
+      `2️⃣ <b>Outlook OTP:</b> Upload CSV → Generate → Fetch\n` +
+      `3️⃣ <b>LongVan OTP:</b> Tap 'LongVan OTP' → Enter phone → Enter OTP\n` +
+      `4️⃣ <b>Web Dashboard:</b> Tap 'Web Dashboard' for stats`;
+    return edit(chatId, messageId, hText, {
+      inline_keyboard: [[{ text: "🏠 Home Menu", callback_data: "home" }]]
+    });
+  }
+
+  // ============================================
+  //  FALLBACK
+  // ============================================
+
   if (data) {
     return edit(chatId, messageId, "⚠️ Action not recognized.", {
       inline_keyboard: [[{ text: "🏠 Home Menu", callback_data: "home" }]]

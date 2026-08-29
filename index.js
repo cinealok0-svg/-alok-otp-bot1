@@ -5,7 +5,7 @@
  * Owner ID: 8452322818
  */
 
-const BOT_TOKEN = "8759442095:AAGCsqImU2IssXIvPIs-2Mdc1vZcdw92UDI";
+const BOT_TOKEN = "875944209-2Mdc1vZcdw92UDI";
 const OWNER_ID = "8452322818";
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 

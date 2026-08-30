@@ -2,15 +2,7 @@
  * AlokMail Pro — Enterprise Production Engine (Cloudflare Worker)
  * Modules: Multi-Domain Temp Mail + Professional Meta AI Wizard + Protected Vaults + Admin Suite
  * Platform: Cloudflare Workers
- * Owner ID: 8452322818
  */
-
-const BOT_TOKEN = "8759442095:AAEgYEEvhaXf3fMt4Vxa7Kobk07UeWFszuk";
-const OWNER_ID = "8452322818";
-const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
-
-// Dynamic Admin Storage
-const ADMIN_SET = new Set([OWNER_ID]);
 
 // Global In-Memory Stores
 const USER_STATE = new Map();
@@ -46,19 +38,27 @@ const DOMAINS = [
 
 export default {
   async fetch(request, env, ctx) {
+    if (!env.BOT_TOKEN || !env.OWNER_ID) {
+      return new Response("Error: BOT_TOKEN or OWNER_ID environment variables not set in Cloudflare.", { status: 500 });
+    }
+
     if (request.method !== "POST") {
       return new Response("⚡ AlokMail Pro Enterprise Engine Active 24/7", { status: 200 });
     }
     try {
       const update = await request.json();
-      ctx.waitUntil(handleTelegramUpdate(update));
+      ctx.waitUntil(handleTelegramUpdate(update, env));
     } catch (e) {}
     return new Response("OK", { status: 200 });
   }
 };
 
-function checkIsAdmin(userId) {
-  return userId === OWNER_ID || ADMIN_SET.has(userId);
+function getAdminSet(env) {
+  return new Set([env.OWNER_ID]);
+}
+
+function checkIsAdmin(userId, env, adminSet) {
+  return userId === env.OWNER_ID || adminSet.has(userId);
 }
 
 function getRandomUser() {
@@ -182,7 +182,10 @@ async function fetchFastDetail(type, user, domain, sid, id) {
 }
 
 // Telegram Message Router
-async function handleTelegramUpdate(update) {
+async function handleTelegramUpdate(update, env) {
+  const telegramApi = `https://api.telegram.org/bot${env.BOT_TOKEN}`;
+  const adminSet = getAdminSet(env);
+
   const msg = update.message;
   const cb = update.callback_query;
   const chatId = msg?.chat?.id || cb?.message?.chat?.id;
@@ -195,7 +198,7 @@ async function handleTelegramUpdate(update) {
   if (!chatId) return;
 
   if (cb?.id) {
-    await fetch(`${TELEGRAM_API}/answerCallbackQuery`, {
+    await fetch(`${telegramApi}/answerCallbackQuery`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ callback_query_id: cb.id })
@@ -203,18 +206,18 @@ async function handleTelegramUpdate(update) {
   }
 
   let session = USER_STATE.get(userId) || { history: [], mode: null, metaWizard: null };
-  const isAdmin = checkIsAdmin(userId);
-  const isOwner = userId === OWNER_ID;
+  const isAdmin = checkIsAdmin(userId, env, adminSet);
+  const isOwner = userId === env.OWNER_ID;
 
   // File Upload Handlers
   if (document) {
-    if (!isAdmin) return send(chatId, "⛔ <b>Admin Access Restricted.</b>");
+    if (!isAdmin) return send(chatId, "⛔ <b>Admin Access Restricted.</b>", telegramApi);
 
     try {
-      const fileRes = await fetch(`${TELEGRAM_API}/getFile?file_id=${document.file_id}`);
+      const fileRes = await fetch(`${telegramApi}/getFile?file_id=${document.file_id}`);
       const fileData = await fileRes.json();
       const filePath = fileData.result.file_path;
-      const downloadRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`);
+      const downloadRes = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`);
       const fileContent = await downloadRes.text();
 
       const lines = fileContent.split(/\r?\n/);
@@ -223,20 +226,20 @@ async function handleTelegramUpdate(update) {
       if (accounts.length > 0) {
         if (session.mode === 'upload_meta') {
           META_VAULT.fresh = [...accounts, ...META_VAULT.fresh];
-          return send(chatId, `🤖 <b>META ACCOUNTS LOADED!</b>\n• Added: <code>${accounts.length}</code>\n• Total Fresh Stock: <code>${META_VAULT.fresh.length}</code>`, {
+          return send(chatId, `🤖 <b>META ACCOUNTS LOADED!</b>\n• Added: <code>${accounts.length}</code>\n• Total Fresh Stock: <code>${META_VAULT.fresh.length}</code>`, telegramApi, {
             inline_keyboard: [[{ text: "🤖 Meta AI Hub", callback_data: "meta_hub" }]]
           });
         } else {
           INSTA_VAULT.fresh = [...accounts, ...INSTA_VAULT.fresh];
-          return send(chatId, `📸 <b>INSTAGRAM ACCOUNTS LOADED!</b>\n• Added: <code>${accounts.length}</code>\n• Total Fresh Stock: <code>${INSTA_VAULT.fresh.length}</code>`, {
+          return send(chatId, `📸 <b>INSTAGRAM ACCOUNTS LOADED!</b>\n• Added: <code>${accounts.length}</code>\n• Total Fresh Stock: <code>${INSTA_VAULT.fresh.length}</code>`, telegramApi, {
             inline_keyboard: [[{ text: "📸 Insta Vault", callback_data: "insta_vault" }]]
           });
         }
       } else {
-        return send(chatId, "❌ <i>No valid accounts found in file.</i>");
+        return send(chatId, "❌ <i>No valid accounts found in file.</i>", telegramApi);
       }
     } catch (e) {
-      return send(chatId, `❌ <i>File Error: ${e.message}</i>`);
+      return send(chatId, `❌ <i>File Error: ${e.message}</i>`, telegramApi);
     }
   }
 
@@ -246,8 +249,8 @@ async function handleTelegramUpdate(update) {
     USER_STATE.set(userId, session);
     const targetId = text.replace(/[^0-9]/g, '');
     if (targetId.length > 5) {
-      ADMIN_SET.add(targetId);
-      return send(chatId, `✅ <b>Sub-Admin Promoted:</b> <code>${targetId}</code>`, {
+      adminSet.add(targetId);
+      return send(chatId, `✅ <b>Sub-Admin Promoted:</b> <code>${targetId}</code>`, telegramApi, {
         inline_keyboard: [[{ text: "👑 Admin Panel", callback_data: "admin_panel" }]]
       });
     }
@@ -260,7 +263,7 @@ async function handleTelegramUpdate(update) {
     const added = lines.map(parseAccountLine).filter(Boolean);
     if (added.length > 0) {
       META_VAULT.fresh = [...added, ...META_VAULT.fresh];
-      return send(chatId, `✅ <b>Saved ${added.length} Meta Accounts!</b>`, {
+      return send(chatId, `✅ <b>Saved ${added.length} Meta Accounts!</b>`, telegramApi, {
         inline_keyboard: [[{ text: "🤖 Meta AI Hub", callback_data: "meta_hub" }]]
       });
     }
@@ -273,7 +276,7 @@ async function handleTelegramUpdate(update) {
     const added = lines.map(parseAccountLine).filter(Boolean);
     if (added.length > 0) {
       INSTA_VAULT.fresh = [...added, ...INSTA_VAULT.fresh];
-      return send(chatId, `✅ <b>Saved ${added.length} Insta Accounts!</b>`, {
+      return send(chatId, `✅ <b>Saved ${added.length} Insta Accounts!</b>`, telegramApi, {
         inline_keyboard: [[{ text: "📸 Insta Vault", callback_data: "insta_vault" }]]
       });
     }
@@ -324,12 +327,12 @@ async function handleTelegramUpdate(update) {
     ]);
 
     const kb = { inline_keyboard: rows };
-    return messageId ? edit(chatId, messageId, welcome, kb) : send(chatId, welcome, kb);
+    return messageId ? edit(chatId, messageId, welcome, telegramApi, kb) : send(chatId, welcome, telegramApi, kb);
   }
 
   // 2. Meta AI Hub
   if (data === "meta_hub") {
-    if (!isAdmin) return send(chatId, "⛔ Admin Only.");
+    if (!isAdmin) return send(chatId, "⛔ Admin Only.", telegramApi);
     session.mode = null;
     USER_STATE.set(userId, session);
 
@@ -354,21 +357,20 @@ async function handleTelegramUpdate(update) {
         ]
       ]
     };
-    return edit(chatId, messageId, mText, kb);
+    return edit(chatId, messageId, mText, telegramApi, kb);
   }
 
-  // 3. Meta AI Step-by-Step Wizard Engine (Clean Single-Message State Tracker)
+  // 3. Meta AI Step-by-Step Wizard Engine
   if (data === "mw_start" || data === "mw_swap") {
     if (!isAdmin) return;
 
-    // Create fresh dedicated mailbox for Meta session
     const mb = await createFastMailbox();
     const firstName = NAMES_FIRST[Math.floor(Math.random() * NAMES_FIRST.length)];
     const lastName = NAMES_LAST[Math.floor(Math.random() * NAMES_LAST.length)];
     const password = generateStrongPassword();
     const dobDay = Math.floor(1 + Math.random() * 28);
     const dobMonth = Math.floor(1 + Math.random() * 12);
-    const dobYear = Math.floor(1994 + Math.random() * 7); // 1994 - 2000 (Safe 18+)
+    const dobYear = Math.floor(1994 + Math.random() * 7);
 
     session.metaWizard = {
       mb,
@@ -408,17 +410,17 @@ async function handleTelegramUpdate(update) {
         [{ text: "🏠 Return to Meta Hub", callback_data: "meta_hub" }]
       ]
     };
-    return edit(chatId, messageId, wizardCard, kb);
+    return edit(chatId, messageId, wizardCard, telegramApi, kb);
   }
 
-  // Meta Wizard Live OTP Checker (Updates the same message cleanly)
+  // Meta Wizard Live OTP Checker
   if (data && data.startsWith("mw_check_")) {
     const tokenPart = data.replace("mw_check_", "");
     const [type, user, domain, sid] = tokenPart.split(":");
     const activeEmail = `${user}@${domain}`;
 
     if (!session.metaWizard) {
-      return edit(chatId, messageId, "⚠️ <i>Wizard session expired. Please restart.</i>", {
+      return edit(chatId, messageId, "⚠️ <i>Wizard session expired. Please restart.</i>", telegramApi, {
         inline_keyboard: [[{ text: "🚀 Launch Wizard", callback_data: "mw_start" }]]
       });
     }
@@ -440,7 +442,7 @@ async function handleTelegramUpdate(update) {
           [{ text: "⬅️ Back to Wizard Card", callback_data: "mw_card" }]
         ]
       };
-      return edit(chatId, messageId, waitCard, kb);
+      return edit(chatId, messageId, waitCard, telegramApi, kb);
     }
 
     let detectedOtp = null;
@@ -482,7 +484,7 @@ async function handleTelegramUpdate(update) {
           [{ text: "🤖 Meta Hub", callback_data: "meta_hub" }]
         ]
       };
-      return edit(chatId, messageId, successCard, kb);
+      return edit(chatId, messageId, successCard, telegramApi, kb);
     } else {
       const unparsedCard = 
         `📬 <b>EMAIL RECEIVED, PARSING CODE...</b>\n` +
@@ -496,14 +498,13 @@ async function handleTelegramUpdate(update) {
           [{ text: "⬅️ Back to Wizard Card", callback_data: "mw_card" }]
         ]
       };
-      return edit(chatId, messageId, unparsedCard, kb);
+      return edit(chatId, messageId, unparsedCard, telegramApi, kb);
     }
   }
 
-  // Meta Wizard Card View
   if (data === "mw_card") {
     if (!session.metaWizard) {
-      return edit(chatId, messageId, "⚠️ <i>No active wizard. Launch new:</i>", {
+      return edit(chatId, messageId, "⚠️ <i>No active wizard. Launch new:</i>", telegramApi, {
         inline_keyboard: [[{ text: "🚀 Launch Wizard", callback_data: "mw_start" }]]
       });
     }
@@ -520,7 +521,7 @@ async function handleTelegramUpdate(update) {
       `👇 <i>Choose an action below:</i>`;
 
     const token = `${mb.type}:${mb.user}:${mb.domain}:${mb.sid}`;
-    return edit(chatId, messageId, wizardCard, {
+    return edit(chatId, messageId, wizardCard, telegramApi, {
       inline_keyboard: [
         [{ text: "📩 Check Meta OTP", callback_data: `mw_check_${token}` }],
         [
@@ -533,10 +534,9 @@ async function handleTelegramUpdate(update) {
     });
   }
 
-  // Save Wizard Account to Vault
   if (data === "mw_save") {
     if (!session.metaWizard) {
-      return edit(chatId, messageId, "⚠️ <i>No active wizard session to save.</i>", {
+      return edit(chatId, messageId, "⚠️ <i>No active wizard session to save.</i>", telegramApi, {
         inline_keyboard: [[{ text: "🤖 Meta Hub", callback_data: "meta_hub" }]]
       });
     }
@@ -552,7 +552,7 @@ async function handleTelegramUpdate(update) {
     session.metaWizard = null;
     USER_STATE.set(userId, session);
 
-    return edit(chatId, messageId, `✅ <b>ACCOUNT STORED IN META VAULT!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${acc.username}</code>\n🔑 <code>${acc.password}</code>\n👤 <code>${acc.extra}</code>\n\n📦 <b>Total Fresh Meta Stock:</b> <code>${META_VAULT.fresh.length}</code>`, {
+    return edit(chatId, messageId, `✅ <b>ACCOUNT STORED IN META VAULT!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${acc.username}</code>\n🔑 <code>${acc.password}</code>\n👤 <code>${acc.extra}</code>\n\n📦 <b>Total Fresh Meta Stock:</b> <code>${META_VAULT.fresh.length}</code>`, telegramApi, {
       inline_keyboard: [
         [{ text: "🚀 Create Next Meta Account", callback_data: "mw_start" }],
         [{ text: "🤖 Return to Meta Hub", callback_data: "meta_hub" }],
@@ -561,11 +561,10 @@ async function handleTelegramUpdate(update) {
     });
   }
 
-  // Fetch 1 Saved Meta Account
   if (data === "meta_get") {
     if (!isAdmin) return;
     if (META_VAULT.fresh.length === 0) {
-      return edit(chatId, messageId, `⚠️ <b>Meta Vault is Empty!</b>\nUse the creator wizard or upload accounts first.`, {
+      return edit(chatId, messageId, `⚠️ <b>Meta Vault is Empty!</b>\nUse the creator wizard or upload accounts first.`, telegramApi, {
         inline_keyboard: [
           [{ text: "🚀 Launch Creator Wizard", callback_data: "mw_start" }],
           [{ text: "⬅️ Back to Meta Hub", callback_data: "meta_hub" }]
@@ -584,7 +583,7 @@ async function handleTelegramUpdate(update) {
       (acc.extra ? `ℹ️ <b>Details:</b> <code>${acc.extra}</code>\n\n` : '') +
       `📦 <i>Account moved to Used Archive.\nRemaining in Vault: ${META_VAULT.fresh.length}</i>`;
 
-    return edit(chatId, messageId, card, {
+    return edit(chatId, messageId, card, telegramApi, {
       inline_keyboard: [
         [{ text: "⚡ Get Next Meta ID", callback_data: "meta_get" }],
         [{ text: "🤖 Meta Hub", callback_data: "meta_hub" }],
@@ -597,7 +596,7 @@ async function handleTelegramUpdate(update) {
     if (!isAdmin) return;
     session.mode = 'awaiting_meta_save';
     USER_STATE.set(userId, session);
-    return edit(chatId, messageId, `💾 <b>Send Meta credentials now:</b>\n<code>email:password</code> or <code>email|password</code>`, {
+    return edit(chatId, messageId, `💾 <b>Send Meta credentials now:</b>\n<code>email:password</code> or <code>email|password</code>`, telegramApi, {
       inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "meta_hub" }]]
     });
   }
@@ -606,7 +605,7 @@ async function handleTelegramUpdate(update) {
     if (!isAdmin) return;
     session.mode = 'upload_meta';
     USER_STATE.set(userId, session);
-    return edit(chatId, messageId, `📂 <b>Upload your .txt/.csv file for Meta Vault.</b>`, {
+    return edit(chatId, messageId, `📂 <b>Upload your .txt/.csv file for Meta Vault.</b>`, telegramApi, {
       inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "meta_hub" }]]
     });
   }
@@ -614,12 +613,12 @@ async function handleTelegramUpdate(update) {
   if (data === "meta_export") {
     if (!isAdmin) return;
     const list = META_VAULT.used.map(a => a.raw).join("\n") || "No used accounts.";
-    return sendDocument(chatId, list, "used_meta_accounts.txt", `📦 Used Meta Accounts Archive (${META_VAULT.used.length})`);
+    return sendDocument(chatId, list, "used_meta_accounts.txt", `📦 Used Meta Accounts Archive (${META_VAULT.used.length})`, telegramApi);
   }
 
   // 4. Instagram Vault Hub
   if (data === "insta_vault") {
-    if (!isAdmin) return send(chatId, "⛔ Admin Only.");
+    if (!isAdmin) return send(chatId, "⛔ Admin Only.", telegramApi);
     const vText = 
       `📸 <b>INSTAGRAM VAULT CONTROL HUB</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -636,13 +635,13 @@ async function handleTelegramUpdate(update) {
         [{ text: "🏠 Return to Home Menu", callback_data: "home" }]
       ]
     };
-    return edit(chatId, messageId, vText, kb);
+    return edit(chatId, messageId, vText, telegramApi, kb);
   }
 
   if (data === "insta_get") {
     if (!isAdmin) return;
     if (INSTA_VAULT.fresh.length === 0) {
-      return edit(chatId, messageId, `⚠️ <b>Insta Vault is Empty!</b>`, {
+      return edit(chatId, messageId, `⚠️ <b>Insta Vault is Empty!</b>`, telegramApi, {
         inline_keyboard: [[{ text: "📸 Back to Vault", callback_data: "insta_vault" }]]
       });
     }
@@ -656,7 +655,7 @@ async function handleTelegramUpdate(update) {
       `🔑 <b>Password:</b> <code>${acc.password}</code>\n\n` +
       `📦 <i>Remaining in Vault: ${INSTA_VAULT.fresh.length}</i>`;
 
-    return edit(chatId, messageId, card, {
+    return edit(chatId, messageId, card, telegramApi, {
       inline_keyboard: [
         [{ text: "⚡ Get Next Insta ID", callback_data: "insta_get" }],
         [{ text: "📸 Vault Hub", callback_data: "insta_vault" }],
@@ -669,7 +668,7 @@ async function handleTelegramUpdate(update) {
     if (!isAdmin) return;
     session.mode = 'awaiting_insta_save';
     USER_STATE.set(userId, session);
-    return edit(chatId, messageId, `💾 <b>Send Instagram credentials now:</b>\n<code>username:password</code>`, {
+    return edit(chatId, messageId, `💾 <b>Send Instagram credentials now:</b>\n<code>username:password</code>`, telegramApi, {
       inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "insta_vault" }]]
     });
   }
@@ -677,17 +676,17 @@ async function handleTelegramUpdate(update) {
   if (data === "insta_export") {
     if (!isAdmin) return;
     const list = INSTA_VAULT.used.map(a => a.raw).join("\n") || "No accounts.";
-    return sendDocument(chatId, list, "used_insta_accounts.txt", `📦 Used Insta Accounts (${INSTA_VAULT.used.length})`);
+    return sendDocument(chatId, list, "used_insta_accounts.txt", `📦 Used Insta Accounts (${INSTA_VAULT.used.length})`, telegramApi);
   }
 
   // 5. Admin Control Panel
   if (text === "/admin" || data === "admin_panel") {
-    if (!isAdmin) return send(chatId, "❌ Unauthorized.");
-    const adminListStr = Array.from(ADMIN_SET).map(id => `• <code>${id}</code> ${id === OWNER_ID ? '(Owner 👑)' : '(Sub-Admin 🛡️)'}`).join("\n");
+    if (!isAdmin) return send(chatId, "❌ Unauthorized.", telegramApi);
+    const adminListStr = Array.from(adminSet).map(id => `• <code>${id}</code> ${id === env.OWNER_ID ? '(Owner 👑)' : '(Sub-Admin 🛡️)'}`).join("\n");
     const aText = 
       `👑 <b>ENTERPRISE ADMIN MANAGEMENT</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `• <b>Owner ID:</b> <code>${OWNER_ID}</code>\n` +
+      `• <b>Owner ID:</b> <code>${env.OWNER_ID}</code>\n` +
       `• <b>Meta Vault Stock:</b> <code>${META_VAULT.fresh.length}</code> Accounts\n` +
       `• <b>Insta Vault Stock:</b> <code>${INSTA_VAULT.fresh.length}</code> Accounts\n\n` +
       `👥 <b>Authorized Admins:</b>\n${adminListStr}`;
@@ -700,13 +699,13 @@ async function handleTelegramUpdate(update) {
     }
     rows.push([{ text: "🏠 Return to Home Menu", callback_data: "home" }]);
 
-    return messageId ? edit(chatId, messageId, aText, { inline_keyboard: rows }) : send(chatId, aText, { inline_keyboard: rows });
+    return messageId ? edit(chatId, messageId, aText, telegramApi, { inline_keyboard: rows }) : send(chatId, aText, telegramApi, { inline_keyboard: rows });
   }
 
   if (data === "admin_add_prompt" && isOwner) {
     session.mode = 'awaiting_add_admin';
     USER_STATE.set(userId, session);
-    return edit(chatId, messageId, `➕ <b>Send Telegram User ID to authorize as Sub-Admin:</b>`, {
+    return edit(chatId, messageId, `➕ <b>Send Telegram User ID to authorize as Sub-Admin:</b>`, telegramApi, {
       inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "admin_panel" }]]
     });
   }
@@ -729,7 +728,7 @@ async function handleTelegramUpdate(update) {
       `⏳ <b>Status:</b> 🟢 <i>Listening for OTPs...</i>`;
 
     const token = `${mb.type}:${mb.user}:${mb.domain}:${mb.sid}`;
-    return edit(chatId, messageId, out, {
+    return edit(chatId, messageId, out, telegramApi, {
       inline_keyboard: [
         [{ text: "📩 Fetch OTP / Check Inbox", callback_data: `chk:${token}` }],
         [
@@ -757,7 +756,7 @@ async function handleTelegramUpdate(update) {
     const list = await fetchFastMessages(type, user, domain, sid);
 
     if (!list || list.length === 0) {
-      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${activeEmail}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, {
+      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${activeEmail}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, telegramApi, {
         inline_keyboard: [
           [{ text: "🔄 Refresh Inbox", callback_data: `chk:${token}` }],
           [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home Menu", callback_data: "home" }]
@@ -789,7 +788,7 @@ async function handleTelegramUpdate(update) {
     }
     kbRows.push([{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home Menu", callback_data: "home" }]);
 
-    return edit(chatId, messageId, report, { inline_keyboard: kbRows });
+    return edit(chatId, messageId, report, telegramApi, { inline_keyboard: kbRows });
   }
 
   // 8. Domains Menu
@@ -801,14 +800,14 @@ async function handleTelegramUpdate(update) {
       rows.push(row);
     }
     rows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
-    return edit(chatId, messageId, `🌐 <b>Select Domain:</b>`, { inline_keyboard: rows });
+    return edit(chatId, messageId, `🌐 <b>Select Domain:</b>`, telegramApi, { inline_keyboard: rows });
   }
 
   // 9. History Menu
   if (data === "history") {
     const list = session.history || [];
     let hMsg = `📜 <b>Recent Inboxes:</b>\n\n` + (list.map((e, idx) => `${idx + 1}. <code>${e}</code>`).join('\n') || "None");
-    return edit(chatId, messageId, hMsg, {
+    return edit(chatId, messageId, hMsg, telegramApi, {
       inline_keyboard: [[{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home Menu", callback_data: "home" }]]
     });
   }
@@ -822,7 +821,7 @@ async function handleTelegramUpdate(update) {
       `2️⃣ <b>Meta AI Wizard:</b> Step-by-step account creator card with live DOB, password generator, non-spamming OTP tracker, and 1-click email swapping.\n` +
       `3️⃣ <b>Instagram & Meta Vault:</b> Secure administrative stock management.`;
 
-    return edit(chatId, messageId, hText, {
+    return edit(chatId, messageId, hText, telegramApi, {
       inline_keyboard: [[{ text: "🏠 Return to Home Menu", callback_data: "home" }]]
     });
   }
@@ -837,34 +836,34 @@ async function handleTelegramUpdate(update) {
       `• <b>Platform:</b> Cloudflare Workers Global Edge\n` +
       `• <b>Latency:</b> < 15ms`;
 
-    return edit(chatId, messageId, sText, {
+    return edit(chatId, messageId, sText, telegramApi, {
       inline_keyboard: [[{ text: "🏠 Back", callback_data: "home" }]]
     });
   }
 }
 
 // Global API Helpers
-async function send(chatId, text, kb = null) {
+async function send(chatId, text, telegramApi, kb = null) {
   const p = { chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
   if (kb) p.reply_markup = kb;
-  return fetch(`${TELEGRAM_API}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  return fetch(`${telegramApi}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
 }
 
-async function edit(chatId, msgId, text, kb = null) {
+async function edit(chatId, msgId, text, telegramApi, kb = null) {
   const p = { chat_id: chatId, message_id: msgId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
   if (kb) p.reply_markup = kb;
-  const res = await fetch(`${TELEGRAM_API}/editMessageText`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
-  if (!res.ok) return send(chatId, text, kb);
+  const res = await fetch(`${telegramApi}/editMessageText`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  if (!res.ok) return send(chatId, text, telegramApi, kb);
   return res;
 }
 
-async function sendDocument(chatId, content, filename, caption) {
+async function sendDocument(chatId, content, filename, caption, telegramApi) {
   const formData = new FormData();
   formData.append("chat_id", chatId);
   formData.append("caption", caption);
   formData.append("parse_mode", "HTML");
   formData.append("document", new Blob([content], { type: "text/plain" }), filename);
-  return fetch(`${TELEGRAM_API}/sendDocument`, { method: "POST", body: formData });
+  return fetch(`${telegramApi}/sendDocument`, { method: "POST", body: formData });
 }
 
 function escapeHtml(str) {

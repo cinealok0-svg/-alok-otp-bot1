@@ -32,7 +32,6 @@ export default {
 };
 
 // ================= PERMANENT KV STORAGE LOGIC =================
-// If KV is not bound, it falls back to temporary memory (which resets).
 let MEMORY_VAULT = [];
 let MEMORY_STATE = new Map();
 
@@ -62,7 +61,7 @@ async function getUserState(env, userId) {
 async function setUserState(env, userId, state) {
   if (env.ALOK_KV) {
     if (state) {
-      await env.ALOK_KV.put(`STATE_${userId}`, state, { expirationTtl: 300 }); // Expires in 5 mins
+      await env.ALOK_KV.put(`STATE_${userId}`, state, { expirationTtl: 300 });
     } else {
       await env.ALOK_KV.delete(`STATE_${userId}`);
     }
@@ -253,15 +252,16 @@ async function handleTelegramUpdate(update, env) {
     }
 
     const acc = vaultData.shift();
-    await saveVault(env, vaultData); // Update vault after removing the extracted account
+    await saveVault(env, vaultData);
 
+    // Beautiful boxed view for extracted account
     const card = 
-      `🪪 <b>EXTRACTED ACCOUNT</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🪪 <b>EXTRACTED ACCOUNT BOX</b>\n` +
+      `┌──────────────────────────\n` +
       `📧 <b>Email/User:</b>\n<code>${acc.username}</code>\n\n` +
       `🔑 <b>Password:</b>\n<code>${acc.password}</code>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      (acc.extra ? `ℹ️ <b>Extra Details:</b> <code>${acc.extra}</code>\n\n` : '') +
+      (acc.extra ? `ℹ️ <b>Details:</b> <code>${acc.extra}</code>\n` : '') +
+      `└──────────────────────────\n` +
       `📉 <i>Remaining in Vault: ${vaultData.length}</i>`;
 
     return edit(chatId, messageId, card, telegramApi, {

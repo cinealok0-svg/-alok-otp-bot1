@@ -1,26 +1,38 @@
 /**
- * AlokMail Pro — Professional Edition with mail.cx API & Permanent KV Storage
- * Requirement: KV Namespace bound as "ALOK_KV"
+ * Simple Temp Mail Bot — Personal Use Only
+ * Platform: Cloudflare Workers
+ *
+ * Features:
+ *  - Generate a disposable email address
+ *  - Check inbox / auto-detect OTP
+ *  - Two providers: Guerrilla Mail + 1secmail (both free, no signup, no token)
+ *
+ * No storage, no account vault, no bulk generation.
+ * Set BOT_TOKEN as an environment variable / secret before deploying —
+ * do not hardcode it in source.
  */
 
-// ================= HARDCODED CONFIGURATION =================
-const CONFIG = {
-  BOT_TOKEN: "8759442095:AAGCsqImU2IssXIvPIs-2Mdc1vZcdw92UDI",
-  OWNER_ID: "8452322818"
-};
-// ===========================================================
-
-// mail.cx system domains & popular aliases
-const MAIL_DOMAINS = [
-  'uqu.me',
-  'mail.cx',
-  'tempmail.cx'
+// Guerrilla Mail domains (this API only accepts these specific domains)
+const GUERRILLA_DOMAINS = [
+  'guerrillamailblock.com',
+  'sharklasers.com',
+  'grr.la'
 ];
+
+// 1secmail domains (this API only accepts these specific domains)
+const SECMAIL_DOMAINS = [
+  '1secmail.com',
+  '1secmail.org',
+  '1secmail.net'
+];
+
+// Combined menu list. Each entry knows which provider it belongs to.
+const DOMAIN_LIST = [...GUERRILLA_DOMAINS, ...SECMAIL_DOMAINS];
 
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("⚡ AlokMail Pro (mail.cx Engine) Running.", { status: 200 });
+      return new Response("Temp Mail Bot is running.", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -30,339 +42,257 @@ export default {
   }
 };
 
-// ================= PERMANENT KV STORAGE LOGIC =================
-let MEMORY_VAULT = { fresh: [], used: [] };
-let MEMORY_STATE = new Map();
-
-async function getVault(env) {
-  if (env.ALOK_KV) {
-    const data = await env.ALOK_KV.get("ALOK_VAULT_MAILCX");
-    return data ? JSON.parse(data) : { fresh: [], used: [] };
-  }
-  return MEMORY_VAULT;
-}
-
-async function saveVault(env, vaultData) {
-  if (env.ALOK_KV) {
-    await env.ALOK_KV.put("ALOK_VAULT_MAILCX", JSON.stringify(vaultData));
-  }
-  MEMORY_VAULT = vaultData;
-}
-
-async function getUserState(env, userId) {
-  if (env.ALOK_KV) {
-    return await env.ALOK_KV.get(`STATE_${userId}`) || null;
-  }
-  return MEMORY_STATE.get(userId) || null;
-}
-
-async function setUserState(env, userId, state) {
-  if (env.ALOK_KV) {
-    if (state) await env.ALOK_KV.put(`STATE_${userId}`, state, { expirationTtl: 300 });
-    else await env.ALOK_KV.delete(`STATE_${userId}`);
-  } else {
-    if (state) MEMORY_STATE.set(userId, state);
-    else MEMORY_STATE.delete(userId);
-  }
-}
-
-// ================= HELPER FUNCTIONS =================
+// ================= HELPERS =================
 function getRandomUser() {
-  const chars = 'abcdefghijklmnopqrstuvwxyz';
+  const chars = 'abcdefghjkmnpqrstuvwxyz';
   let name = '';
-  for(let i=0; i<6; i++) name += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 5; i++) name += chars[Math.floor(Math.random() * chars.length)];
   return `${name}${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+function escapeHtml(str) {
+  return (str || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function extractSmartOtp(text) {
   if (!text) return null;
-  const clean = text.replace(/<[^>]*>/g, ' ');
-  const match = clean.match(/(?:OTP|code|verification code|passcode|secret code|pin|c\u00f3digo|pin code)\D{0,14}(\d{4,8})/i) || clean.match(/\b\d{4,8}\b/);
+  const clean = text.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ');
+  const match =
+    clean.match(/(?:OTP|code|verification code|passcode|secret code|pin|c\u00f3digo|pin code)\D{0,14}(\d{4,8})/i) ||
+    clean.match(/\b\d{6,8}\b/) ||
+    clean.match(/\b\d{4}\b/);
   return match ? (match[1] || match[0]) : null;
 }
 
-function parseAccountLine(line) {
-  line = line.trim();
-  if (!line) return null;
-  let delimiter = '|';
-  if (!line.includes('|')) {
-    if (line.includes(':')) delimiter = ':';
-    else if (line.includes(',')) delimiter = ',';
-  }
-  const parts = line.split(delimiter).map(p => p.trim());
-  if (parts.length >= 2) {
-    return { username: parts[0], password: parts[1], extra: parts[2] || '', raw: line };
-  }
-  return null;
-}
-
-// ================= MAIL.CX API ENGINE =================
-async function createMailcxBox(domainChoice = null) {
+// ================= PROVIDER: GUERRILLA MAIL =================
+// f=1 marker used in the callback token
+async function createGuerrillaMailbox(domain) {
   const user = getRandomUser();
-  const domain = domainChoice || MAIL_DOMAINS[Math.floor(Math.random() * MAIL_DOMAINS.length)];
-  const email = `${user}@${domain}`;
-  return { email, user, domain };
+  const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
+  const sid = init.sid_token || '';
+  const setRes = await fetch(
+    `https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`
+  ).then(r => r.json());
+  return { provider: 'g', email: (setRes.email_addr || `${user}@${domain}`).toLowerCase(), sid };
 }
 
-async function fetchMailcxMessages(email) {
+async function fetchGuerrillaMessages(sid) {
   try {
-    // Using mail.cx public inbox endpoint (free, unlimited)
-    const res = await fetch(`https://api.mail.cx/v1/inbox/${email}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.emails || [];
-  } catch (e) {
-    return [];
-  }
+    const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${sid}`).then(r => r.json());
+    return (res.list || [])
+      .filter(m => m.mail_from !== 'no-reply@guerrillamail.com')
+      .map(m => ({ id: m.mail_id, from: m.mail_from, subject: m.mail_subject }));
+  } catch (e) { return []; }
 }
 
-async function fetchMailcxDetail(email, emailId) {
+async function fetchGuerrillaDetail(sid, mailId) {
   try {
-    const res = await fetch(`https://api.mail.cx/v1/email/${emailId}`);
-    if (!res.ok) return { from: 'Unknown', subject: '', body: '' };
-    const mail = await res.json();
+    const data = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${mailId}&sid_token=${sid}`).then(r => r.json());
     return {
-      from: mail.from_email || mail.from || 'Unknown',
-      subject: mail.subject || '(No Subject)',
-      body: mail.text || mail.html || mail.preview_text || ''
+      from: data.mail_from || 'Unknown',
+      subject: data.mail_subject || '(No Subject)',
+      body: data.mail_body || ''
     };
-  } catch (e) {
-    return { from: 'Unknown', subject: '', body: '' };
+  } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
+}
+
+// ================= PROVIDER: 1SECMAIL =================
+// Simple, well-documented, no auth needed at all.
+// Docs pattern: https://www.1secmail.com/api/v1/?action=...
+async function createSecmailMailbox(domain) {
+  const user = getRandomUser();
+  // 1secmail needs no creation step — any login@domain on their domains is
+  // implicitly a valid inbox the moment mail is sent to it.
+  return { provider: 's', email: `${user}@${domain}`, login: user, domain };
+}
+
+async function fetchSecmailMessages(login, domain) {
+  try {
+    const res = await fetch(
+      `https://www.1secmail.com/api/v1/?action=getMessages&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}`
+    );
+    if (!res.ok) return [];
+    const list = await res.json();
+    return (list || []).map(m => ({ id: m.id, from: m.from, subject: m.subject }));
+  } catch (e) { return []; }
+}
+
+async function fetchSecmailDetail(login, domain, mailId) {
+  try {
+    const res = await fetch(
+      `https://www.1secmail.com/api/v1/?action=readMessage&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${mailId}`
+    );
+    if (!res.ok) return { from: 'Unknown', subject: '', body: '' };
+    const data = await res.json();
+    return {
+      from: data.from || 'Unknown',
+      subject: data.subject || '(No Subject)',
+      body: data.textBody || data.htmlBody || data.body || ''
+    };
+  } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
+}
+
+// ================= DISPATCH =================
+async function createMailbox(domainChoice = null) {
+  const domain = domainChoice || DOMAIN_LIST[Math.floor(Math.random() * DOMAIN_LIST.length)];
+  if (SECMAIL_DOMAINS.includes(domain)) {
+    return createSecmailMailbox(domain);
   }
+  try {
+    return await createGuerrillaMailbox(domain);
+  } catch (e) {
+    // fall back to 1secmail if Guerrilla Mail's API is briefly down
+    return createSecmailMailbox(SECMAIL_DOMAINS[0]);
+  }
+}
+
+async function fetchMessages(provider, login, domain, sid) {
+  return provider === 's' ? fetchSecmailMessages(login, domain) : fetchGuerrillaMessages(sid);
+}
+
+async function fetchDetail(provider, login, domain, sid, mailId) {
+  return provider === 's' ? fetchSecmailDetail(login, domain, mailId) : fetchGuerrillaDetail(sid, mailId);
 }
 
 // ================= TELEGRAM ROUTER =================
 async function handleTelegramUpdate(update, env) {
-  const telegramApi = `https://api.telegram.org/bot${CONFIG.BOT_TOKEN}`;
+  const telegramApi = `https://api.telegram.org/bot${env.BOT_TOKEN}`;
   const msg = update.message;
   const cb = update.callback_query;
   const chatId = msg?.chat?.id || cb?.message?.chat?.id;
   const messageId = cb?.message?.message_id;
   const text = msg?.text?.trim();
   const data = cb?.data;
-  const userId = String(msg?.from?.id || cb?.from?.id || "");
 
   if (!chatId) return;
 
   if (cb?.id) {
-    await fetch(`${telegramApi}/answerCallbackQuery`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callback_query_id: cb.id }) }).catch(() => {});
+    await fetch(`${telegramApi}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cb.id })
+    }).catch(() => {});
   }
 
-  const isAdmin = userId === CONFIG.OWNER_ID;
-  const userState = await getUserState(env, userId);
-
-  // 1. Save Text Accounts (Admin)
-  if (text && userState === 'awaiting_save' && isAdmin) {
-    await setUserState(env, userId, null);
-    const lines = text.split(/\r?\n/);
-    const added = lines.map(parseAccountLine).filter(Boolean);
-    
-    if (added.length > 0) {
-      let vault = await getVault(env);
-      vault.fresh = [...added, ...vault.fresh];
-      await saveVault(env, vault);
-      return send(chatId, `✅ <b>Success!</b> <code>${added.length}</code> accounts securely stored in Fresh Vault.`, telegramApi, {
-        inline_keyboard: [[{ text: "📦 Open Account Vault", callback_data: "vault_hub" }]]
-      });
-    } else {
-      return send(chatId, `❌ <i>Invalid format. Please use Email:Password</i>`, telegramApi);
-    }
-  }
-
-  // 2. Main Menu
+  // Home / Start
   if (text === "/start" || data === "home") {
-    await setUserState(env, userId, null);
-    
-    let welcome = 
-      `🛡️ <b>ALOKMAIL PRO — mail.cx EDITION</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `High-speed temporary email generator (Powered by mail.cx) & permanent secure vault.\n\n`;
-
-    const rows = [
-      [{ text: "⚡ Generate mail.cx Temp Mail", callback_data: "gen" }],
-      [{ text: "🌐 Switch Domain", callback_data: "domains" }]
-    ];
-
-    if (isAdmin) {
-      const vault = await getVault(env);
-      welcome += 
-        `👑 <b>Vault Status:</b>\n` +
-        `• Database: 🟢 <b>Permanent KV Online</b>\n` +
-        `• 🟢 Fresh Stock: <code>${vault.fresh.length}</code> IDs\n` +
-        `• 📁 Used Archive: <code>${vault.used.length}</code> IDs\n\n`;
-      rows.push([{ text: "📦 Secure Account Vault & Manager", callback_data: "vault_hub" }]);
-    }
-
-    const kb = { inline_keyboard: rows };
-    return messageId ? edit(chatId, messageId, welcome, telegramApi, kb) : send(chatId, welcome, telegramApi, kb);
-  }
-
-  // 3. Vault Hub
-  if (data === "vault_hub" && isAdmin) {
-    const vault = await getVault(env);
-    const vText = 
-      `📦 <b>SECURE ACCOUNT VAULT MANAGER</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `• 🟢 <b>Fresh Ready Stock:</b> <code>${vault.fresh.length}</code> IDs\n` +
-      `• 📁 <b>Used / Extracted Archive:</b> <code>${vault.used.length}</code> IDs\n\n` +
-      `<i>Fresh IDs are safe. Once extracted, they automatically move to the Used section so they are never repeated.</i>`;
-
+    const card =
+      `📬 <b>TEMP MAIL BOT</b>\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
+      `Generate a disposable email and check its inbox.`;
     const kb = {
       inline_keyboard: [
-        [{ text: "⚡ Get 1 Fresh Account", callback_data: "vault_get" }],
-        [{ text: "➕ Add New Accounts", callback_data: "vault_add" }],
-        [{ text: "📁 Download Used IDs (.txt)", callback_data: "vault_export" }],
-        [{ text: "🏠 Return to Home Menu", callback_data: "home" }]
+        [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
+        [{ text: "🌐 Switch Domain", callback_data: "domains" }]
       ]
     };
-    return edit(chatId, messageId, vText, telegramApi, kb);
+    return messageId ? edit(chatId, messageId, card, telegramApi, kb) : send(chatId, card, telegramApi, kb);
   }
 
-  if (data === "vault_add" && isAdmin) {
-    await setUserState(env, userId, 'awaiting_save');
-    return edit(chatId, messageId, `💾 <b>Send credentials in this format:</b>\n\n<code>email@domain.com:password123</code>\n\n<i>You can send multiple accounts by putting each on a new line.</i>`, telegramApi, {
-      inline_keyboard: [[{ text: "⬅️ Cancel", callback_data: "vault_hub" }]]
-    });
-  }
-
-  if (data === "vault_get" && isAdmin) {
-    let vault = await getVault(env);
-    if (vault.fresh.length === 0) {
-      return edit(chatId, messageId, `⚠️ <b>Fresh Vault is Empty!</b>\nPlease add new accounts first.`, telegramApi, {
-        inline_keyboard: [
-          [{ text: "➕ Add Accounts", callback_data: "vault_add" }],
-          [{ text: "📦 Vault Hub", callback_data: "vault_hub" }]
-        ]
-      });
-    }
-
-    const acc = vault.fresh.shift(); // Pull from fresh
-    vault.used.unshift(acc);         // Push to used archive
-    await saveVault(env, vault);
-
-    const card = 
-      `🪪 <b>EXTRACTED FRESH ACCOUNT</b>\n` +
-      `┌──────────────────────────\n` +
-      `📧 <b>Email:</b>\n<code>${acc.username}</code>\n\n` +
-      `🔑 <b>Password:</b>\n<code>${acc.password}</code>\n` +
-      (acc.extra ? `ℹ️ <b>Details:</b> <code>${acc.extra}</code>\n` : '') +
-      `└──────────────────────────\n` +
-      `📉 <i>Fresh Remaining: ${vault.fresh.length} | Archived Used: ${vault.used.length}</i>`;
-
-    return edit(chatId, messageId, card, telegramApi, {
-      inline_keyboard: [
-        [{ text: "⚡ Get Next Fresh ID", callback_data: "vault_get" }],
-        [{ text: "📦 Return to Vault Hub", callback_data: "vault_hub" }],
-        [{ text: "🏠 Main Menu", callback_data: "home" }]
-      ]
-    });
-  }
-
-  if (data === "vault_export" && isAdmin) {
-    const vault = await getVault(env);
-    if (vault.used.length === 0) {
-      return edit(chatId, messageId, `⚠️ <i>No used accounts in archive to download.</i>`, telegramApi, {
-        inline_keyboard: [[{ text: "📦 Back to Vault", callback_data: "vault_hub" }]]
-      });
-    }
-    const fileContent = vault.used.map(a => a.raw || `${a.username}:${a.password}`).join("\n");
-    return sendDocument(chatId, fileContent, "used_accounts_archive.txt", `📁 Used Accounts Archive (${vault.used.length} IDs)`, telegramApi);
-  }
-
-  // 4. Temp Mail Generation (mail.cx)
+  // Generate mailbox
   if (data === "gen" || (data && data.startsWith("dgen_"))) {
     const domainChoice = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
-    const mb = await createMailcxBox(domainChoice);
+    const mb = await createMailbox(domainChoice);
+    // Token format: t:provider:login:domain:sid
+    const token = `t:${mb.provider}:${mb.provider === 's' ? mb.login : ''}:${mb.email}:${mb.provider === 'g' ? mb.sid : ''}`;
+    const domainName = mb.email.split('@')[1];
 
-    const out = 
-      `📬 <b>mail.cx TEMPORARY EMAIL</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `📧 <b>Email Address:</b> <i>(Tap to copy)</i>\n` +
-      `<code>${mb.email}</code>\n\n` +
-      `📡 <b>Active Domain:</b> <code>${mb.domain}</code>\n` +
-      `⏳ <b>Status:</b> 🟢 <i>Listening via mail.cx API...</i>`;
+    const out =
+      `📬 <b>DISPOSABLE ADDRESS READY</b>\n` +
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <b>Email:</b>\n<code>${mb.email}</code>\n\n` +
+      `📡 <b>Server:</b> <code>${domainName}</code>\n` +
+      `⏳ <i>Tap below to check inbox.</i>`;
 
-    const token = encodeURIComponent(mb.email);
     return edit(chatId, messageId, out, telegramApi, {
       inline_keyboard: [
-        [{ text: "📩 Fetch OTP / Check Inbox", callback_data: `chk:${token}` }],
-        [{ text: "🔄 Refresh", callback_data: `chk:${token}` }, { text: "⚡ New Mail", callback_data: "gen" }],
-        [{ text: "🏠 Home Menu", callback_data: "home" }]
+        [{ text: "📩 Check Inbox", callback_data: token }],
+        [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🌐 Switch Domain", callback_data: "domains" }],
+        [{ text: "🏠 Home", callback_data: "home" }]
       ]
     });
   }
 
-  // 5. Temp Mail Inbox Checker (mail.cx)
-  if (data && data.startsWith("chk:")) {
-    const email = decodeURIComponent(data.replace("chk:", ""));
-    const token = encodeURIComponent(email);
+  // Check inbox
+  if (data && data.startsWith("t:")) {
+    const parts = data.split(":");
+    const provider = parts[1];
+    const login = parts[2];
+    const email = parts[3];
+    const sid = parts[4] || '';
+    const domain = email.split('@')[1];
 
-    const list = await fetchMailcxMessages(email);
+    const list = await fetchMessages(provider, login, domain, sid);
 
     if (!list || list.length === 0) {
-      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${email}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, telegramApi, {
-        inline_keyboard: [
-          [{ text: "🔄 Refresh Inbox", callback_data: `chk:${token}` }],
-          [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Menu", callback_data: "home" }]
-        ]
-      });
+      return edit(chatId, messageId,
+        `📭 <b>No messages yet</b>\n\n📧 <code>${email}</code>\n\n<i>Tap refresh to check again.</i>`,
+        telegramApi,
+        {
+          inline_keyboard: [
+            [{ text: "🔄 Refresh", callback_data: data }],
+            [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home", callback_data: "home" }]
+          ]
+        });
     }
 
-    let report = `📬 <b>INBOX RECEIVED (${list.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${email}</code>\n\n`;
+    let report = `📬 <b>INBOX (${list.length})</b>\n━━━━━━━━━━━━━━━━━━\n📧 <code>${email}</code>\n\n`;
     let detectedOtp = null;
 
     for (let i = 0; i < Math.min(list.length, 3); i++) {
-      const m = list[i];
-      const mailDetails = await fetchMailcxDetail(email, m.id || m.uid);
-      const fullText = (mailDetails.subject || "") + " " + (mailDetails.body || "");
+      const detail = await fetchDetail(provider, login, domain, sid, list[i].id);
+      const mail = {
+        from: detail.from !== 'Unknown' ? detail.from : (list[i].from || 'Unknown'),
+        subject: detail.subject || list[i].subject || '(No Subject)',
+        body: detail.body
+      };
+      const fullText = (mail.subject || "") + " " + (mail.body || "");
       const otp = extractSmartOtp(fullText);
       if (otp && !detectedOtp) detectedOtp = otp;
 
-      report += `📩 <b>From:</b> <code>${(mailDetails.from || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>\n`;
-      report += `📝 <b>Subject:</b> <i>${(mailDetails.subject || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>\n`;
-      if (otp) report += `🔑 <b>DETECTED OTP:</b> <code>${otp}</code>\n`;
-      report += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+      report += `📩 <b>From:</b> <code>${escapeHtml(mail.from)}</code>\n`;
+      report += `📝 <b>Subject:</b> <i>${escapeHtml(mail.subject)}</i>\n`;
+      if (otp) report += `🔑 <b>OTP:</b> <code>${otp}</code>\n`;
+      report += `━━━━━━━━━━━━━━━━━━\n`;
     }
 
-    const kbRows = [[{ text: "🔄 Refresh Inbox", callback_data: `chk:${token}` }]];
-    if (detectedOtp) kbRows.unshift([{ text: `📋 Copy OTP: ${detectedOtp}`, callback_data: "dummy" }]);
-    kbRows.push([{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Menu", callback_data: "home" }]);
-
+    const kbRows = [[{ text: "🔄 Refresh", callback_data: data }]];
+    kbRows.push([{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home", callback_data: "home" }]);
     return edit(chatId, messageId, report, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // 6. Domains Menu
+  // Domain switcher
   if (data === "domains") {
     const rows = [];
-    for (let i = 0; i < MAIL_DOMAINS.length; i += 2) {
-      const row = [{ text: `@${MAIL_DOMAINS[i]}`, callback_data: `dgen_${MAIL_DOMAINS[i]}` }];
-      if (MAIL_DOMAINS[i + 1]) row.push({ text: `@${MAIL_DOMAINS[i + 1]}`, callback_data: `dgen_${MAIL_DOMAINS[i + 1]}` });
+    for (let i = 0; i < DOMAIN_LIST.length; i += 2) {
+      const row = [{ text: `@${DOMAIN_LIST[i]}`, callback_data: `dgen_${DOMAIN_LIST[i]}` }];
+      if (DOMAIN_LIST[i + 1]) row.push({ text: `@${DOMAIN_LIST[i + 1]}`, callback_data: `dgen_${DOMAIN_LIST[i + 1]}` });
       rows.push(row);
     }
-    rows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
-    return edit(chatId, messageId, `🌐 <b>Select mail.cx Domain:</b>`, telegramApi, { inline_keyboard: rows });
+    rows.push([{ text: "🏠 Home", callback_data: "home" }]);
+    return edit(chatId, messageId, `🌐 <b>Select Domain:</b>`, telegramApi, { inline_keyboard: rows });
   }
 }
 
+// ================= TELEGRAM SEND HELPERS =================
 async function send(chatId, text, telegramApi, kb = null) {
-  const p = { chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
-  if (kb) p.reply_markup = kb;
-  return fetch(`${telegramApi}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  const payload = { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true };
+  if (kb) payload.reply_markup = kb;
+  return fetch(`${telegramApi}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 }
 
 async function edit(chatId, msgId, text, telegramApi, kb = null) {
-  const p = { chat_id: chatId, message_id: msgId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
-  if (kb) p.reply_markup = kb;
-  const res = await fetch(`${telegramApi}/editMessageText`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  const payload = { chat_id: chatId, message_id: msgId, text, parse_mode: "HTML", disable_web_page_preview: true };
+  if (kb) payload.reply_markup = kb;
+  const res = await fetch(`${telegramApi}/editMessageText`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
   if (!res.ok) return send(chatId, text, telegramApi, kb);
   return res;
-}
-
-async function sendDocument(chatId, content, filename, caption, telegramApi) {
-  const formData = new FormData();
-  formData.append("chat_id", chatId);
-  formData.append("caption", caption);
-  formData.append("parse_mode", "HTML");
-  formData.append("document", new Blob([content], { type: "text/plain" }), filename);
-  return fetch(`${telegramApi}/sendDocument`, { method: "POST", body: formData });
 }

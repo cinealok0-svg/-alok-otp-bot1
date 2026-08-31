@@ -12,11 +12,37 @@
  * do not hardcode it in source.
  */
 
+// mail.cx system domains are NOT fixed — they must be fetched from /v1/config.
+// We cache them for a short time so we don't call /v1/config on every request.
+let MAILCX_DOMAIN_CACHE = { domains: [], fetchedAt: 0 };
+
+async function getMailcxDomains() {
+  const now = Date.now();
+  if (MAILCX_DOMAIN_CACHE.domains.length && (now - MAILCX_DOMAIN_CACHE.fetchedAt) < 10 * 60 * 1000) {
+    return MAILCX_DOMAIN_CACHE.domains;
+  }
+  try {
+    const res = await fetch('https://api.mail.cx/v1/config');
+    const data = await res.json();
+    // The public config exposes the usable system domains; fall back if shape differs.
+    const domains = data.domains || data.system_domains || [];
+    if (domains.length) {
+      MAILCX_DOMAIN_CACHE = { domains, fetchedAt: now };
+      return domains;
+    }
+  } catch (e) {}
+  // Safe fallback if /v1/config is unreachable
+  return MAILCX_DOMAIN_CACHE.domains.length ? MAILCX_DOMAIN_CACHE.domains : ['mailcx.pro'];
+}
+
+// Combined list shown in the "Switch Domain" menu.
+// mail.cx domains are resolved lazily at generation time, so here we only
+// need a stable label to route on.
 const DOMAIN_LIST = [
   'guerrillamailblock.com',
   'sharklasers.com',
   'grr.la',
-  'mail.cx'
+  'mailcx-auto'   // special marker: "pick a live mail.cx system domain"
 ];
 
 export default {
@@ -58,10 +84,15 @@ function extractSmartOtp(text) {
 async function createMailbox(domainChoice = null) {
   const user = getRandomUser();
   const domain = domainChoice || DOMAIN_LIST[Math.floor(Math.random() * DOMAIN_LIST.length)];
-  const isCx = domain === 'mail.cx';
+  const isCx = domain === 'mailcx-auto';
 
   if (isCx) {
-    return { isCx: '1', email: `${user}@mail.cx`, sid: '0' };
+    // mail.cx has no "create mailbox" step — any address on one of its live
+    // system domains starts receiving mail immediately. We just need a
+    // currently-valid domain, fetched from /v1/config.
+    const domains = await getMailcxDomains();
+    const cxDomain = domains[Math.floor(Math.random() * domains.length)];
+    return { isCx: '1', email: `${user}@${cxDomain}`, sid: '0' };
   }
 
   try {
@@ -79,10 +110,19 @@ async function createMailbox(domainChoice = null) {
 async function fetchMessages(isCx, email, sid) {
   if (isCx === '1') {
     try {
+      // GET /v1/inbox/{address} is a long-poll: it holds the connection open
+      // (server-side, up to ~25s) and returns as soon as mail arrives, or
+      // 204 if the window elapses with nothing new. No auth token needed
+      // for anonymous/low-volume use (just a lower per-IP rate limit).
       const res = await fetch(`https://api.mail.cx/v1/inbox/${encodeURIComponent(email)}`);
+      if (res.status === 204) return []; // no new mail within the poll window
       if (!res.ok) return [];
       const data = await res.json();
-      return (data.emails || []).map(m => ({ id: m.id || m.uid }));
+      return (data.emails || []).map(m => ({
+        id: m.id,
+        from: m.from_email,
+        subject: m.subject
+      }));
     } catch (e) { return []; }
   } else {
     try {
@@ -99,8 +139,9 @@ async function fetchDetail(isCx, email, sid, mailId) {
       if (!res.ok) return { from: 'Unknown', subject: '', body: '' };
       const data = await res.json();
       return {
-        from: data.from_email || data.from || 'Unknown',
+        from: data.from_email || 'Unknown',
         subject: data.subject || '(No Subject)',
+        // full parsed body: prefer plain text, fall back to html, then preview
         body: data.text || data.html || data.preview_text || ''
       };
     } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
@@ -199,7 +240,14 @@ async function handleTelegramUpdate(update, env) {
     let detectedOtp = null;
 
     for (let i = 0; i < Math.min(list.length, 3); i++) {
-      const mail = await fetchDetail(isCx, email, sid, list[i].id);
+      // For mail.cx the inbox list already includes from/subject; only fetch
+      // the full body (needed for OTP extraction) via /v1/email/{id}.
+      const detail = await fetchDetail(isCx, email, sid, list[i].id);
+      const mail = {
+        from: detail.from !== 'Unknown' ? detail.from : (list[i].from || 'Unknown'),
+        subject: detail.subject || list[i].subject || '(No Subject)',
+        body: detail.body
+      };
       const fullText = (mail.subject || "") + " " + (mail.body || "");
       const otp = extractSmartOtp(fullText);
       if (otp && !detectedOtp) detectedOtp = otp;
@@ -217,10 +265,11 @@ async function handleTelegramUpdate(update, env) {
 
   // Domain switcher
   if (data === "domains") {
+    const labelFor = (d) => d === 'mailcx-auto' ? '@mail.cx (auto)' : `@${d}`;
     const rows = [];
     for (let i = 0; i < DOMAIN_LIST.length; i += 2) {
-      const row = [{ text: `@${DOMAIN_LIST[i]}`, callback_data: `dgen_${DOMAIN_LIST[i]}` }];
-      if (DOMAIN_LIST[i + 1]) row.push({ text: `@${DOMAIN_LIST[i + 1]}`, callback_data: `dgen_${DOMAIN_LIST[i + 1]}` });
+      const row = [{ text: labelFor(DOMAIN_LIST[i]), callback_data: `dgen_${DOMAIN_LIST[i]}` }];
+      if (DOMAIN_LIST[i + 1]) row.push({ text: labelFor(DOMAIN_LIST[i + 1]), callback_data: `dgen_${DOMAIN_LIST[i + 1]}` });
       rows.push(row);
     }
     rows.push([{ text: "🏠 Home", callback_data: "home" }]);

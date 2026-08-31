@@ -1,12 +1,12 @@
 /**
- * AlokMail Pro — Final Hybrid Edition (mail.cx + Guerrilla + Permanent KV)
+ * AlokMail Pro — Final Production Edition (mail.cx + Guerrilla + Permanent KV)
  * Platform: Cloudflare Workers
  * Requirement: KV Namespace bound as "ALOK_KV"
  */
 
 // ================= HARDCODED CONFIGURATION =================
 const CONFIG = {
-  BOT_TOKEN: "8759442095:AAGCsqImU2IssXIvPIs-2Mdc1vZcdw92UDI",
+  BOT_TOKEN: "8759442095:AAEgYEEvhaXf3fMt4Vxa7Kobk07UeWFszuk",
   OWNER_ID: "8452322818"
 };
 // ===========================================================
@@ -42,7 +42,7 @@ let MEMORY_STATE = new Map();
 
 async function getVault(env) {
   if (env.ALOK_KV) {
-    const data = await env.ALOK_KV.get("ALOK_HYBRID_VAULT_PRO_V2");
+    const data = await env.ALOK_KV.get("ALOK_HYBRID_VAULT_PRO_V3");
     return data ? JSON.parse(data) : { fresh: [], used: [] };
   }
   return MEMORY_VAULT;
@@ -50,7 +50,7 @@ async function getVault(env) {
 
 async function saveVault(env, vaultData) {
   if (env.ALOK_KV) {
-    await env.ALOK_KV.put("ALOK_HYBRID_VAULT_PRO_V2", JSON.stringify(vaultData));
+    await env.ALOK_KV.put("ALOK_HYBRID_VAULT_PRO_V3", JSON.stringify(vaultData));
   }
   MEMORY_VAULT = vaultData;
 }

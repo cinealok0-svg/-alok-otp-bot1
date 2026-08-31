@@ -298,4 +298,4 @@ async function edit(chatId, msgId, text, telegramApi, kb = null) {
   });
   if (!res.ok) return send(chatId, text, telegramApi, kb);
   return res;
-}
+} 

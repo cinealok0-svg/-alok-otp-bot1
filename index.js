@@ -1,27 +1,32 @@
 /**
- * AlokMail Pro — Professional Edition with Permanent KV & Clean Vault Management
+ * AlokMail Pro — Hybrid Edition (mail.cx + Guerrilla + Permanent KV Vault)
  * Platform: Cloudflare Workers
  * Requirement: KV Namespace bound as "ALOK_KV"
  */
 
-const GUERRILLA_DOMAINS = [
+// ================= HARDCODED CONFIGURATION =================
+const CONFIG = {
+  BOT_TOKEN: "8759442095:AAGCsqImU2IssXIvPIs-2Mdc1vZcdw92UDI",
+  OWNER_ID: "8452322818"
+};
+// ===========================================================
+
+// Combined Best Working Domains (mail.cx + Guerrilla powerful domains)
+const HYBRID_DOMAINS = [
+  'mail.cx',
+  'uqu.me',
+  'tempmail.cx',
   'guerrillamailblock.com',
   'sharklasers.com',
   'grr.la',
   'guerrillamail.net',
-  'guerrillamail.org',
-  'spam4.me',
-  'pokemail.net',
-  'guerrillamail.com'
+  'spam4.me'
 ];
 
 export default {
   async fetch(request, env, ctx) {
-    if (!env.BOT_TOKEN || !env.OWNER_ID) {
-      return new Response("Error: BOT_TOKEN or OWNER_ID not set in Environment Variables.", { status: 500 });
-    }
     if (request.method !== "POST") {
-      return new Response("⚡ AlokMail Pro Enterprise Engine Running.", { status: 200 });
+      return new Response("⚡ AlokMail Pro Hybrid Enterprise Engine Running.", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -37,7 +42,7 @@ let MEMORY_STATE = new Map();
 
 async function getVault(env) {
   if (env.ALOK_KV) {
-    const data = await env.ALOK_KV.get("ALOK_VAULT_PRO");
+    const data = await env.ALOK_KV.get("ALOK_HYBRID_VAULT_PRO");
     return data ? JSON.parse(data) : { fresh: [], used: [] };
   }
   return MEMORY_VAULT;
@@ -45,7 +50,7 @@ async function getVault(env) {
 
 async function saveVault(env, vaultData) {
   if (env.ALOK_KV) {
-    await env.ALOK_KV.put("ALOK_VAULT_PRO", JSON.stringify(vaultData));
+    await env.ALOK_KV.put("ALOK_HYBRID_VAULT_PRO", JSON.stringify(vaultData));
   }
   MEMORY_VAULT = vaultData;
 }
@@ -97,42 +102,69 @@ function parseAccountLine(line) {
   return null;
 }
 
-// ================= MAIL ENGINE =================
-async function createFastMailbox(domainChoice = null) {
+// ================= DUAL MAIL ENGINE (mail.cx & Guerrilla) =================
+async function createHybridMailbox(domainChoice = null) {
   const user = getRandomUser();
-  const domain = domainChoice || GUERRILLA_DOMAINS[Math.floor(Math.random() * GUERRILLA_DOMAINS.length)];
-  
-  try {
-    const initRes = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address');
-    const initData = await initRes.json();
-    const sid = initData.sid_token;
-    const setRes = await fetch(`https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`);
-    const setData = await setRes.json();
-    return { type: 'g', email: (setData.email_addr || `${user}@${domain}`).toLowerCase(), user, domain, sid };
-  } catch (e) {
-    return { type: 's', email: `${user}@1secmail.com`, user, domain: '1secmail.com', sid: '0' };
+  const domain = domainChoice || HYBRID_DOMAINS[Math.floor(Math.random() * HYBRID_DOMAINS.length)];
+  const isMailcx = domain.includes('mail.cx') || domain.includes('uqu.me') || domain.includes('tempmail.cx');
+
+  if (isMailcx) {
+    return { api: 'mailcx', email: `${user}@${domain}`, user, domain };
+  } else {
+    try {
+      const initRes = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address');
+      const initData = await initRes.json();
+      const sid = initData.sid_token;
+      const setRes = await fetch(`https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`);
+      const setData = await setRes.json();
+      return { api: 'guerrilla', email: (setData.email_addr || `${user}@${domain}`).toLowerCase(), user, domain, sid };
+    } catch (e) {
+      return { api: 'mailcx', email: `${user}@mail.cx`, user, domain: 'mail.cx' };
+    }
   }
 }
 
-async function fetchFastMessages(type, user, domain, sid) {
-  try {
-    const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${sid}`);
-    const data = await res.json();
-    return (data.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com').map(m => ({ id: m.mail_id }));
-  } catch (e) { return []; }
+async function fetchHybridMessages(mb) {
+  if (mb.api === 'mailcx') {
+    try {
+      const res = await fetch(`https://api.mail.cx/v1/inbox/${mb.email}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.emails || []).map(m => ({ id: m.id || m.uid }));
+    } catch (e) { return []; }
+  } else {
+    try {
+      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${mb.sid}`);
+      const data = await res.json();
+      return (data.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com').map(m => ({ id: m.mail_id }));
+    } catch (e) { return []; }
+  }
 }
 
-async function fetchFastDetail(type, user, domain, sid, id) {
-  try {
-    const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${id}&sid_token=${sid}`);
-    const mail = await res.json();
-    return { from: mail.mail_from || 'Unknown', subject: mail.mail_subject || '', body: mail.mail_body || '' };
-  } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
+async function fetchHybridDetail(mb, mailId) {
+  if (mb.api === 'mailcx') {
+    try {
+      const res = await fetch(`https://api.mail.cx/v1/email/${mailId}`);
+      if (!res.ok) return { from: 'Unknown', subject: '', body: '' };
+      const mail = await res.json();
+      return {
+        from: mail.from_email || mail.from || 'Unknown',
+        subject: mail.subject || '(No Subject)',
+        body: mail.text || mail.html || mail.preview_text || ''
+      };
+    } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
+  } else {
+    try {
+      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${mailId}&sid_token=${mb.sid}`);
+      const mail = await res.json();
+      return { from: mail.mail_from || 'Unknown', subject: mail.mail_subject || '', body: mail.mail_body || '' };
+    } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
+  }
 }
 
 // ================= TELEGRAM ROUTER =================
 async function handleTelegramUpdate(update, env) {
-  const telegramApi = `https://api.telegram.org/bot${env.BOT_TOKEN}`;
+  const telegramApi = `https://api.telegram.org/bot${CONFIG.BOT_TOKEN}`;
   const msg = update.message;
   const cb = update.callback_query;
   const chatId = msg?.chat?.id || cb?.message?.chat?.id;
@@ -147,7 +179,7 @@ async function handleTelegramUpdate(update, env) {
     await fetch(`${telegramApi}/answerCallbackQuery`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callback_query_id: cb.id }) }).catch(() => {});
   }
 
-  const isAdmin = userId === env.OWNER_ID;
+  const isAdmin = userId === CONFIG.OWNER_ID;
   const userState = await getUserState(env, userId);
 
   // 1. Save Text Accounts (Admin)
@@ -173,12 +205,12 @@ async function handleTelegramUpdate(update, env) {
     await setUserState(env, userId, null);
     
     let welcome = 
-      `🛡️ <b>ALOKMAIL PRO — ENTERPRISE DASHBOARD</b>\n` +
+      `🛡️ <b>ALOKMAIL PRO — HYBRID ENTERPRISE</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `High-speed temporary email generator & permanent secure account vault.\n\n`;
+      `High-speed temporary email generator (mail.cx & Guerrilla) with permanent secure vault.\n\n`;
 
     const rows = [
-      [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
+      [{ text: "⚡ Generate Hybrid Temp Mail", callback_data: "gen" }],
       [{ text: "🌐 Switch Domain", callback_data: "domains" }]
     ];
 
@@ -204,7 +236,7 @@ async function handleTelegramUpdate(update, env) {
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `• 🟢 <b>Fresh Ready Stock:</b> <code>${vault.fresh.length}</code> IDs\n` +
       `• 📁 <b>Used / Extracted Archive:</b> <code>${vault.used.length}</code> IDs\n\n` +
-      `<i>Fresh IDs are safe to use. Once extracted, they automatically move to the Used section so they are never repeated.</i>`;
+      `<i>Fresh IDs are safe. Once extracted, they automatically move to the Used section so they are never repeated.</i>`;
 
     const kb = {
       inline_keyboard: [
@@ -271,7 +303,7 @@ async function handleTelegramUpdate(update, env) {
   // 4. Temp Mail Generation
   if (data === "gen" || (data && data.startsWith("dgen_"))) {
     const domainChoice = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
-    const mb = await createFastMailbox(domainChoice);
+    const mb = await createHybridMailbox(domainChoice);
 
     const out = 
       `📬 <b>TEMPORARY EMAIL GENERATOR</b>\n` +
@@ -281,7 +313,7 @@ async function handleTelegramUpdate(update, env) {
       `📡 <b>Active Server:</b> <code>${mb.domain}</code>\n` +
       `⏳ <b>Status:</b> 🟢 <i>Listening for incoming OTPs...</i>`;
 
-    const token = `${mb.type}:${mb.user}:${mb.domain}:${mb.sid}`;
+    const token = encodeURIComponent(JSON.stringify(mb));
     return edit(chatId, messageId, out, telegramApi, {
       inline_keyboard: [
         [{ text: "📩 Fetch OTP / Check Inbox", callback_data: `chk:${token}` }],
@@ -293,15 +325,20 @@ async function handleTelegramUpdate(update, env) {
 
   // 5. Temp Mail Inbox Checker
   if (data && data.startsWith("chk:")) {
-    const parts = data.split(":");
-    const type = parts[1], user = parts[2], domain = parts[3], sid = parts[4];
-    const activeEmail = `${user}@${domain}`;
-    const token = `${type}:${user}:${domain}:${sid}`;
+    let mb;
+    try {
+      mb = JSON.parse(decodeURIComponent(data.replace("chk:", "")));
+    } catch (e) {
+      return edit(chatId, messageId, `⚠️ <i>Session expired. Generate a new mail.</i>`, telegramApi, {
+        inline_keyboard: [[{ text: "⚡ New Mail", callback_data: "gen" }]]
+      });
+    }
+    const token = encodeURIComponent(JSON.stringify(mb));
 
-    const list = await fetchFastMessages(type, user, domain, sid);
+    const list = await fetchHybridMessages(mb);
 
     if (!list || list.length === 0) {
-      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${activeEmail}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, telegramApi, {
+      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${mb.email}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, telegramApi, {
         inline_keyboard: [
           [{ text: "🔄 Refresh Inbox", callback_data: `chk:${token}` }],
           [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Menu", callback_data: "home" }]
@@ -309,12 +346,12 @@ async function handleTelegramUpdate(update, env) {
       });
     }
 
-    let report = `📬 <b>INBOX RECEIVED (${list.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${activeEmail}</code>\n\n`;
+    let report = `📬 <b>INBOX RECEIVED (${list.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${mb.email}</code>\n\n`;
     let detectedOtp = null;
 
     for (let i = 0; i < Math.min(list.length, 3); i++) {
       const m = list[i];
-      const mailDetails = await fetchFastDetail(type, user, domain, sid, m.id);
+      const mailDetails = await fetchHybridDetail(mb, m.id);
       const fullText = (mailDetails.subject || "") + " " + (mailDetails.body || "");
       const otp = extractSmartOtp(fullText);
       if (otp && !detectedOtp) detectedOtp = otp;
@@ -335,13 +372,13 @@ async function handleTelegramUpdate(update, env) {
   // 6. Domains Menu
   if (data === "domains") {
     const rows = [];
-    for (let i = 0; i < GUERRILLA_DOMAINS.length; i += 2) {
-      const row = [{ text: `@${GUERRILLA_DOMAINS[i]}`, callback_data: `dgen_${GUERRILLA_DOMAINS[i]}` }];
-      if (GUERRILLA_DOMAINS[i + 1]) row.push({ text: `@${GUERRILLA_DOMAINS[i + 1]}`, callback_data: `dgen_${GUERRILLA_DOMAINS[i + 1]}` });
+    for (let i = 0; i < HYBRID_DOMAINS.length; i += 2) {
+      const row = [{ text: `@${HYBRID_DOMAINS[i]}`, callback_data: `dgen_${HYBRID_DOMAINS[i]}` }];
+      if (HYBRID_DOMAINS[i + 1]) row.push({ text: `@${HYBRID_DOMAINS[i + 1]}`, callback_data: `dgen_${HYBRID_DOMAINS[i + 1]}` });
       rows.push(row);
     }
     rows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
-    return edit(chatId, messageId, `🌐 <b>Select Premium Domain:</b>`, telegramApi, { inline_keyboard: rows });
+    return edit(chatId, messageId, `🌐 <b>Select Hybrid Domain:</b>`, telegramApi, { inline_keyboard: rows });
   }
 }
 

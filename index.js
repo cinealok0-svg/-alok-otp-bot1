@@ -1,5 +1,5 @@
 /**
- * AlokMail Pro — Hybrid Edition (mail.cx + Guerrilla + Permanent KV Vault)
+ * AlokMail Pro — Final Hybrid Edition (mail.cx + Guerrilla + Permanent KV)
  * Platform: Cloudflare Workers
  * Requirement: KV Namespace bound as "ALOK_KV"
  */
@@ -11,7 +11,7 @@ const CONFIG = {
 };
 // ===========================================================
 
-// Combined Best Working Domains (mail.cx + Guerrilla powerful domains)
+// All Best Domains (mail.cx + Guerrilla)
 const HYBRID_DOMAINS = [
   'mail.cx',
   'uqu.me',
@@ -26,7 +26,7 @@ const HYBRID_DOMAINS = [
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("⚡ AlokMail Pro Hybrid Enterprise Engine Running.", { status: 200 });
+      return new Response("⚡ AlokMail Pro Hybrid Engine Running.", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -42,7 +42,7 @@ let MEMORY_STATE = new Map();
 
 async function getVault(env) {
   if (env.ALOK_KV) {
-    const data = await env.ALOK_KV.get("ALOK_HYBRID_VAULT_PRO");
+    const data = await env.ALOK_KV.get("ALOK_HYBRID_VAULT_PRO_V2");
     return data ? JSON.parse(data) : { fresh: [], used: [] };
   }
   return MEMORY_VAULT;
@@ -50,7 +50,7 @@ async function getVault(env) {
 
 async function saveVault(env, vaultData) {
   if (env.ALOK_KV) {
-    await env.ALOK_KV.put("ALOK_HYBRID_VAULT_PRO", JSON.stringify(vaultData));
+    await env.ALOK_KV.put("ALOK_HYBRID_VAULT_PRO_V2", JSON.stringify(vaultData));
   }
   MEMORY_VAULT = vaultData;
 }
@@ -205,12 +205,12 @@ async function handleTelegramUpdate(update, env) {
     await setUserState(env, userId, null);
     
     let welcome = 
-      `🛡️ <b>ALOKMAIL PRO — HYBRID ENTERPRISE</b>\n` +
+      `🛡️ <b>ALOKMAIL PRO — HYBRID DASHBOARD</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `High-speed temporary email generator (mail.cx & Guerrilla) with permanent secure vault.\n\n`;
+      `High-speed temporary email generator (mail.cx & Guerrilla) with permanent secure account vault.\n\n`;
 
     const rows = [
-      [{ text: "⚡ Generate Hybrid Temp Mail", callback_data: "gen" }],
+      [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
       [{ text: "🌐 Switch Domain", callback_data: "domains" }]
     ];
 
@@ -378,7 +378,7 @@ async function handleTelegramUpdate(update, env) {
       rows.push(row);
     }
     rows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
-    return edit(chatId, messageId, `🌐 <b>Select Hybrid Domain:</b>`, telegramApi, { inline_keyboard: rows });
+    return edit(chatId, messageId, `🌐 <b>Select Domain (mail.cx + Guerrilla):</b>`, telegramApi, { inline_keyboard: rows });
   }
 }
 

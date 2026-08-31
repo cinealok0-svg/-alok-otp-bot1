@@ -1,7 +1,8 @@
 /**
- * AlokMail Pro — Final Production Edition (mail.cx + Guerrilla + Permanent KV)
+ * AlokMail Pro — Ultra Enterprise Edition (Dual-Engine Failover + Permanent Vault)
+ * Engines: mail.cx Engine + GuerrillaMail Relay Engine
  * Platform: Cloudflare Workers
- * Requirement: KV Namespace bound as "ALOK_KV"
+ * Storage: ALOK_KV Namespace Binding
  */
 
 // ================= HARDCODED CONFIGURATION =================
@@ -11,22 +12,21 @@ const CONFIG = {
 };
 // ===========================================================
 
-// All Best Domains (mail.cx + Guerrilla)
-const HYBRID_DOMAINS = [
-  'mail.cx',
-  'uqu.me',
-  'tempmail.cx',
-  'guerrillamailblock.com',
-  'sharklasers.com',
-  'grr.la',
-  'guerrillamail.net',
-  'spam4.me'
+const DOMAIN_REGISTRY = [
+  { domain: 'mail.cx', engine: 'mailcx' },
+  { domain: 'uqu.me', engine: 'mailcx' },
+  { domain: 'tempmail.cx', engine: 'mailcx' },
+  { domain: 'guerrillamailblock.com', engine: 'guerrilla' },
+  { domain: 'sharklasers.com', engine: 'guerrilla' },
+  { domain: 'grr.la', engine: 'guerrilla' },
+  { domain: 'guerrillamail.net', engine: 'guerrilla' },
+  { domain: 'spam4.me', engine: 'guerrilla' }
 ];
 
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("⚡ AlokMail Pro Hybrid Engine Running.", { status: 200 });
+      return new Response("⚡ AlokMail Pro Ultra-Engine is Active 24/7.", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -36,30 +36,30 @@ export default {
   }
 };
 
-// ================= PERMANENT KV STORAGE LOGIC =================
-let MEMORY_VAULT = { fresh: [], used: [] };
-let MEMORY_STATE = new Map();
+// ================= PERMANENT KV PERSISTENCE =================
+let RAM_VAULT = { fresh: [], used: [] };
+let RAM_STATE = new Map();
 
 async function getVault(env) {
   if (env.ALOK_KV) {
-    const data = await env.ALOK_KV.get("ALOK_HYBRID_VAULT_PRO_V3");
-    return data ? JSON.parse(data) : { fresh: [], used: [] };
+    const raw = await env.ALOK_KV.get("ALOK_VAULT_ENTERPRISE");
+    return raw ? JSON.parse(raw) : { fresh: [], used: [] };
   }
-  return MEMORY_VAULT;
+  return RAM_VAULT;
 }
 
-async function saveVault(env, vaultData) {
+async function saveVault(env, vault) {
   if (env.ALOK_KV) {
-    await env.ALOK_KV.put("ALOK_HYBRID_VAULT_PRO_V3", JSON.stringify(vaultData));
+    await env.ALOK_KV.put("ALOK_VAULT_ENTERPRISE", JSON.stringify(vault));
   }
-  MEMORY_VAULT = vaultData;
+  RAM_VAULT = vault;
 }
 
 async function getUserState(env, userId) {
   if (env.ALOK_KV) {
     return await env.ALOK_KV.get(`STATE_${userId}`) || null;
   }
-  return MEMORY_STATE.get(userId) || null;
+  return RAM_STATE.get(userId) || null;
 }
 
 async function setUserState(env, userId, state) {
@@ -67,102 +67,103 @@ async function setUserState(env, userId, state) {
     if (state) await env.ALOK_KV.put(`STATE_${userId}`, state, { expirationTtl: 300 });
     else await env.ALOK_KV.delete(`STATE_${userId}`);
   } else {
-    if (state) MEMORY_STATE.set(userId, state);
-    else MEMORY_STATE.delete(userId);
+    if (state) RAM_STATE.set(userId, state);
+    else RAM_STATE.delete(userId);
   }
 }
 
-// ================= HELPER FUNCTIONS =================
-function getRandomUser() {
-  const chars = 'abcdefghijklmnopqrstuvwxyz';
-  let name = '';
-  for(let i=0; i<6; i++) name += chars[Math.floor(Math.random() * chars.length)];
-  return `${name}${Math.floor(1000 + Math.random() * 9000)}`;
+// ================= UTILITIES =================
+function generateSecureUser() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz';
+  let prefix = '';
+  for (let i = 0; i < 6; i++) prefix += chars[Math.floor(Math.random() * chars.length)];
+  return `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
-function extractSmartOtp(text) {
+function parseSmartOtp(text) {
   if (!text) return null;
-  const clean = text.replace(/<[^>]*>/g, ' ');
-  const match = clean.match(/(?:OTP|code|verification code|passcode|secret code|pin|c\u00f3digo|pin code)\D{0,14}(\d{4,8})/i) || clean.match(/\b\d{4,8}\b/);
+  const clean = text.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ');
+  const match = clean.match(/(?:OTP|code|verification code|passcode|secret code|pin|pin code|c\u00f3digo)\D{0,14}(\d{4,8})/i) || clean.match(/\b\d{6,8}\b/) || clean.match(/\b\d{4}\b/);
   return match ? (match[1] || match[0]) : null;
 }
 
-function parseAccountLine(line) {
+function parseAccountPayload(line) {
   line = line.trim();
   if (!line) return null;
-  let delimiter = '|';
+  let sep = '|';
   if (!line.includes('|')) {
-    if (line.includes(':')) delimiter = ':';
-    else if (line.includes(',')) delimiter = ',';
+    if (line.includes(':')) sep = ':';
+    else if (line.includes(',')) sep = ',';
   }
-  const parts = line.split(delimiter).map(p => p.trim());
+  const parts = line.split(sep).map(p => p.trim());
   if (parts.length >= 2) {
     return { username: parts[0], password: parts[1], extra: parts[2] || '', raw: line };
   }
   return null;
 }
 
-// ================= DUAL MAIL ENGINE (mail.cx & Guerrilla) =================
-async function createHybridMailbox(domainChoice = null) {
-  const user = getRandomUser();
-  const domain = domainChoice || HYBRID_DOMAINS[Math.floor(Math.random() * HYBRID_DOMAINS.length)];
-  const isMailcx = domain.includes('mail.cx') || domain.includes('uqu.me') || domain.includes('tempmail.cx');
+// ================= DUAL ENGINE DISPATCHER =================
+async function createInboxSession(targetDomain = null) {
+  const user = generateSecureUser();
+  const def = targetDomain 
+    ? DOMAIN_REGISTRY.find(d => d.domain === targetDomain) || { domain: targetDomain, engine: 'guerrilla' }
+    : DOMAIN_REGISTRY[Math.floor(Math.random() * DOMAIN_REGISTRY.length)];
 
-  if (isMailcx) {
-    return { api: 'mailcx', email: `${user}@${domain}`, user, domain };
+  if (def.engine === 'mailcx') {
+    return { engine: 'mailcx', email: `${user}@${def.domain}`, user, domain: def.domain, sid: '0' };
   } else {
     try {
-      const initRes = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address');
-      const initData = await initRes.json();
-      const sid = initData.sid_token;
-      const setRes = await fetch(`https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`);
-      const setData = await setRes.json();
-      return { api: 'guerrilla', email: (setData.email_addr || `${user}@${domain}`).toLowerCase(), user, domain, sid };
+      const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
+      const sid = init.sid_token || '';
+      const setRes = await fetch(`https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(def.domain)}&lang=en&sid_token=${sid}`).then(r => r.json());
+      return { engine: 'guerrilla', email: (setRes.email_addr || `${user}@${def.domain}`).toLowerCase(), user, domain: def.domain, sid };
     } catch (e) {
-      return { api: 'mailcx', email: `${user}@mail.cx`, user, domain: 'mail.cx' };
+      return { engine: 'mailcx', email: `${user}@mail.cx`, user, domain: 'mail.cx', sid: '0' };
     }
   }
 }
 
-async function fetchHybridMessages(mb) {
-  if (mb.api === 'mailcx') {
+async function fetchIncomingEmails(session) {
+  if (session.engine === 'mailcx') {
     try {
-      const res = await fetch(`https://api.mail.cx/v1/inbox/${mb.email}`);
+      const res = await fetch(`https://api.mail.cx/v1/inbox/${encodeURIComponent(session.email)}`);
       if (!res.ok) return [];
       const data = await res.json();
       return (data.emails || []).map(m => ({ id: m.id || m.uid }));
     } catch (e) { return []; }
   } else {
     try {
-      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${mb.sid}`);
-      const data = await res.json();
-      return (data.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com').map(m => ({ id: m.mail_id }));
+      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${session.sid}`).then(r => r.json());
+      return (res.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com').map(m => ({ id: m.mail_id }));
     } catch (e) { return []; }
   }
 }
 
-async function fetchHybridDetail(mb, mailId) {
-  if (mb.api === 'mailcx') {
+async function fetchEmailContent(session, mailId) {
+  if (session.engine === 'mailcx') {
     try {
       const res = await fetch(`https://api.mail.cx/v1/email/${mailId}`);
       if (!res.ok) return { from: 'Unknown', subject: '', body: '' };
-      const mail = await res.json();
+      const data = await res.json();
       return {
-        from: mail.from_email || mail.from || 'Unknown',
-        subject: mail.subject || '(No Subject)',
-        body: mail.text || mail.html || mail.preview_text || ''
+        from: data.from_email || data.from || 'Unknown',
+        subject: data.subject || '(No Subject)',
+        body: data.text || data.html || data.preview_text || ''
       };
     } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
   } else {
     try {
-      const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${mailId}&sid_token=${mb.sid}`);
-      const mail = await res.json();
-      return { from: mail.mail_from || 'Unknown', subject: mail.mail_subject || '', body: mail.mail_body || '' };
+      const data = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${mailId}&sid_token=${session.sid}`).then(r => r.json());
+      return {
+        from: data.mail_from || 'Unknown',
+        subject: data.mail_subject || '(No Subject)',
+        body: data.mail_body || ''
+      };
     } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
   }
 }
 
-// ================= TELEGRAM ROUTER =================
+// ================= TELEGRAM HANDLER =================
 async function handleTelegramUpdate(update, env) {
   const telegramApi = `https://api.telegram.org/bot${CONFIG.BOT_TOKEN}`;
   const msg = update.message;
@@ -182,17 +183,17 @@ async function handleTelegramUpdate(update, env) {
   const isAdmin = userId === CONFIG.OWNER_ID;
   const userState = await getUserState(env, userId);
 
-  // 1. Save Text Accounts (Admin)
+  // 1. Vault Text Import
   if (text && userState === 'awaiting_save' && isAdmin) {
     await setUserState(env, userId, null);
     const lines = text.split(/\r?\n/);
-    const added = lines.map(parseAccountLine).filter(Boolean);
-    
+    const added = lines.map(parseAccountPayload).filter(Boolean);
+
     if (added.length > 0) {
       let vault = await getVault(env);
       vault.fresh = [...added, ...vault.fresh];
       await saveVault(env, vault);
-      return send(chatId, `✅ <b>Success!</b> <code>${added.length}</code> accounts securely stored in Fresh Vault.`, telegramApi, {
+      return send(chatId, `✅ <b>Success!</b> <code>${added.length}</code> Accounts securely saved to Fresh Vault.`, telegramApi, {
         inline_keyboard: [[{ text: "📦 Open Account Vault", callback_data: "vault_hub" }]]
       });
     } else {
@@ -200,14 +201,14 @@ async function handleTelegramUpdate(update, env) {
     }
   }
 
-  // 2. Main Menu
+  // 2. Dashboard
   if (text === "/start" || data === "home") {
     await setUserState(env, userId, null);
-    
-    let welcome = 
-      `🛡️ <b>ALOKMAIL PRO — HYBRID DASHBOARD</b>\n` +
+
+    let card = 
+      `🛡️ <b>ALOKMAIL PRO — ENTERPRISE DASHBOARD</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `High-speed temporary email generator (mail.cx & Guerrilla) with permanent secure account vault.\n\n`;
+      `High-speed temporary email generator with dual-engine failover & permanent vault storage.\n\n`;
 
     const rows = [
       [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
@@ -216,34 +217,35 @@ async function handleTelegramUpdate(update, env) {
 
     if (isAdmin) {
       const vault = await getVault(env);
-      welcome += 
-        `👑 <b>Vault Status:</b>\n` +
-        `• Database: 🟢 <b>Permanent KV Online</b>\n` +
-        `• 🟢 Fresh Stock: <code>${vault.fresh.length}</code> IDs\n` +
-        `• 📁 Used Archive: <code>${vault.used.length}</code> IDs\n\n`;
+      card += 
+        `👑 <b>Permanent Storage Status:</b>\n` +
+        `• Database: 🟢 <b>ALOK_KV Connected</b>\n` +
+        `• 🟢 Fresh Stock: <code>${vault.fresh.length}</code> Accounts\n` +
+        `• 📁 Used Archive: <code>${vault.used.length}</code> Accounts\n\n`;
       rows.push([{ text: "📦 Secure Account Vault & Manager", callback_data: "vault_hub" }]);
     }
 
+    card += `👇 <i>Select an action below:</i>`;
     const kb = { inline_keyboard: rows };
-    return messageId ? edit(chatId, messageId, welcome, telegramApi, kb) : send(chatId, welcome, telegramApi, kb);
+    return messageId ? edit(chatId, messageId, card, telegramApi, kb) : send(chatId, card, telegramApi, kb);
   }
 
   // 3. Vault Hub
   if (data === "vault_hub" && isAdmin) {
     const vault = await getVault(env);
     const vText = 
-      `📦 <b>SECURE ACCOUNT VAULT MANAGER</b>\n` +
+      `📦 <b>ENTERPRISE ACCOUNT VAULT</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `• 🟢 <b>Fresh Ready Stock:</b> <code>${vault.fresh.length}</code> IDs\n` +
       `• 📁 <b>Used / Extracted Archive:</b> <code>${vault.used.length}</code> IDs\n\n` +
-      `<i>Fresh IDs are safe. Once extracted, they automatically move to the Used section so they are never repeated.</i>`;
+      `<i>Extracted accounts automatically move to the archive to avoid any reuse.</i>`;
 
     const kb = {
       inline_keyboard: [
         [{ text: "⚡ Get 1 Fresh Account", callback_data: "vault_get" }],
         [{ text: "➕ Add New Accounts", callback_data: "vault_add" }],
         [{ text: "📁 Download Used IDs (.txt)", callback_data: "vault_export" }],
-        [{ text: "🏠 Return to Home Menu", callback_data: "home" }]
+        [{ text: "🏠 Return to Dashboard", callback_data: "home" }]
       ]
     };
     return edit(chatId, messageId, vText, telegramApi, kb);
@@ -259,7 +261,7 @@ async function handleTelegramUpdate(update, env) {
   if (data === "vault_get" && isAdmin) {
     let vault = await getVault(env);
     if (vault.fresh.length === 0) {
-      return edit(chatId, messageId, `⚠️ <b>Fresh Vault is Empty!</b>\nPlease add new accounts first.`, telegramApi, {
+      return edit(chatId, messageId, `⚠️ <b>Vault is Empty!</b>\nPlease add fresh accounts first.`, telegramApi, {
         inline_keyboard: [
           [{ text: "➕ Add Accounts", callback_data: "vault_add" }],
           [{ text: "📦 Vault Hub", callback_data: "vault_hub" }]
@@ -267,18 +269,18 @@ async function handleTelegramUpdate(update, env) {
       });
     }
 
-    const acc = vault.fresh.shift(); // Pull from fresh
-    vault.used.unshift(acc);         // Push to used archive
+    const acc = vault.fresh.shift();
+    vault.used.unshift(acc);
     await saveVault(env, vault);
 
     const card = 
       `🪪 <b>EXTRACTED FRESH ACCOUNT</b>\n` +
       `┌──────────────────────────\n` +
-      `📧 <b>Email:</b>\n<code>${acc.username}</code>\n\n` +
-      `🔑 <b>Password:</b>\n<code>${acc.password}</code>\n` +
-      (acc.extra ? `ℹ️ <b>Details:</b> <code>${acc.extra}</code>\n` : '') +
+      `📧 <b>Email:</b> <i>(Tap to copy)</i>\n<code>${acc.username}</code>\n\n` +
+      `🔑 <b>Password:</b> <i>(Tap to copy)</i>\n<code>${acc.password}</code>\n` +
+      (acc.extra ? `\nℹ️ <b>Details:</b> <code>${acc.extra}</code>\n` : '') +
       `└──────────────────────────\n` +
-      `📉 <i>Fresh Remaining: ${vault.fresh.length} | Archived Used: ${vault.used.length}</i>`;
+      `📉 <i>Remaining Fresh: ${vault.fresh.length} | Archived Used: ${vault.used.length}</i>`;
 
     return edit(chatId, messageId, card, telegramApi, {
       inline_keyboard: [
@@ -292,7 +294,7 @@ async function handleTelegramUpdate(update, env) {
   if (data === "vault_export" && isAdmin) {
     const vault = await getVault(env);
     if (vault.used.length === 0) {
-      return edit(chatId, messageId, `⚠️ <i>No used accounts in archive to download.</i>`, telegramApi, {
+      return edit(chatId, messageId, `⚠️ <i>No archived accounts found to download.</i>`, telegramApi, {
         inline_keyboard: [[{ text: "📦 Back to Vault", callback_data: "vault_hub" }]]
       });
     }
@@ -302,43 +304,43 @@ async function handleTelegramUpdate(update, env) {
 
   // 4. Temp Mail Generation
   if (data === "gen" || (data && data.startsWith("dgen_"))) {
-    const domainChoice = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
-    const mb = await createHybridMailbox(domainChoice);
+    const selectedDomain = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
+    const session = await createInboxSession(selectedDomain);
 
+    const token = btoa(JSON.stringify(session)).replace(/=/g, '');
     const out = 
-      `📬 <b>TEMPORARY EMAIL GENERATOR</b>\n` +
+      `📬 <b>DISPOSABLE ADDRESS READY</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `📧 <b>Email Address:</b> <i>(Tap to copy)</i>\n` +
-      `<code>${mb.email}</code>\n\n` +
-      `📡 <b>Active Server:</b> <code>${mb.domain}</code>\n` +
-      `⏳ <b>Status:</b> 🟢 <i>Listening for incoming OTPs...</i>`;
+      `<code>${session.email}</code>\n\n` +
+      `📡 <b>Relay Server:</b> <code>${session.domain}</code> (${session.engine.toUpperCase()})\n` +
+      `⏳ <b>Status:</b> 🟢 <i>Listening for OTPs...</i>`;
 
-    const token = encodeURIComponent(JSON.stringify(mb));
     return edit(chatId, messageId, out, telegramApi, {
       inline_keyboard: [
         [{ text: "📩 Fetch OTP / Check Inbox", callback_data: `chk:${token}` }],
         [{ text: "🔄 Refresh", callback_data: `chk:${token}` }, { text: "⚡ New Mail", callback_data: "gen" }],
-        [{ text: "🏠 Home Menu", callback_data: "home" }]
+        [{ text: "🌐 Switch Domain", callback_data: "domains" }, { text: "🏠 Main Menu", callback_data: "home" }]
       ]
     });
   }
 
   // 5. Temp Mail Inbox Checker
   if (data && data.startsWith("chk:")) {
-    let mb;
+    const token = data.replace("chk:", "");
+    let session;
     try {
-      mb = JSON.parse(decodeURIComponent(data.replace("chk:", "")));
+      session = JSON.parse(atob(token));
     } catch (e) {
-      return edit(chatId, messageId, `⚠️ <i>Session expired. Generate a new mail.</i>`, telegramApi, {
+      return edit(chatId, messageId, `⚠️ <i>Session expired. Please generate a fresh mail.</i>`, telegramApi, {
         inline_keyboard: [[{ text: "⚡ New Mail", callback_data: "gen" }]]
       });
     }
-    const token = encodeURIComponent(JSON.stringify(mb));
 
-    const list = await fetchHybridMessages(mb);
+    const list = await fetchIncomingEmails(session);
 
     if (!list || list.length === 0) {
-      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${mb.email}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, telegramApi, {
+      return edit(chatId, messageId, `📭 <b>WAITING FOR OTP...</b>\n\n📧 <code>${session.email}</code>\n\n<i>No messages received yet. Tap Refresh below:</i>`, telegramApi, {
         inline_keyboard: [
           [{ text: "🔄 Refresh Inbox", callback_data: `chk:${token}` }],
           [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Menu", callback_data: "home" }]
@@ -346,18 +348,18 @@ async function handleTelegramUpdate(update, env) {
       });
     }
 
-    let report = `📬 <b>INBOX RECEIVED (${list.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${mb.email}</code>\n\n`;
+    let report = `📬 <b>INBOX RECEIVED (${list.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📧 <code>${session.email}</code>\n\n`;
     let detectedOtp = null;
 
     for (let i = 0; i < Math.min(list.length, 3); i++) {
       const m = list[i];
-      const mailDetails = await fetchHybridDetail(mb, m.id);
-      const fullText = (mailDetails.subject || "") + " " + (mailDetails.body || "");
-      const otp = extractSmartOtp(fullText);
+      const mail = await fetchEmailContent(session, m.id);
+      const fullText = (mail.subject || "") + " " + (mail.body || "");
+      const otp = parseSmartOtp(fullText);
       if (otp && !detectedOtp) detectedOtp = otp;
 
-      report += `📩 <b>From:</b> <code>${(mailDetails.from || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>\n`;
-      report += `📝 <b>Subject:</b> <i>${(mailDetails.subject || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>\n`;
+      report += `📩 <b>From:</b> <code>${(mail.from || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>\n`;
+      report += `📝 <b>Subject:</b> <i>${(mail.subject || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>\n`;
       if (otp) report += `🔑 <b>DETECTED OTP:</b> <code>${otp}</code>\n`;
       report += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     }
@@ -369,29 +371,31 @@ async function handleTelegramUpdate(update, env) {
     return edit(chatId, messageId, report, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // 6. Domains Menu
+  // 6. Domains Selection
   if (data === "domains") {
     const rows = [];
-    for (let i = 0; i < HYBRID_DOMAINS.length; i += 2) {
-      const row = [{ text: `@${HYBRID_DOMAINS[i]}`, callback_data: `dgen_${HYBRID_DOMAINS[i]}` }];
-      if (HYBRID_DOMAINS[i + 1]) row.push({ text: `@${HYBRID_DOMAINS[i + 1]}`, callback_data: `dgen_${HYBRID_DOMAINS[i + 1]}` });
+    for (let i = 0; i < DOMAIN_REGISTRY.length; i += 2) {
+      const d1 = DOMAIN_REGISTRY[i];
+      const d2 = DOMAIN_REGISTRY[i + 1];
+      const row = [{ text: `@${d1.domain}`, callback_data: `dgen_${d1.domain}` }];
+      if (d2) row.push({ text: `@${d2.domain}`, callback_data: `dgen_${d2.domain}` });
       rows.push(row);
     }
-    rows.push([{ text: "🏠 Home Menu", callback_data: "home" }]);
-    return edit(chatId, messageId, `🌐 <b>Select Domain (mail.cx + Guerrilla):</b>`, telegramApi, { inline_keyboard: rows });
+    rows.push([{ text: "🏠 Return to Dashboard", callback_data: "home" }]);
+    return edit(chatId, messageId, `🌐 <b>Select High-Speed Domain:</b>`, telegramApi, { inline_keyboard: rows });
   }
 }
 
 async function send(chatId, text, telegramApi, kb = null) {
-  const p = { chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
-  if (kb) p.reply_markup = kb;
-  return fetch(`${telegramApi}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  const payload = { chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
+  if (kb) payload.reply_markup = kb;
+  return fetch(`${telegramApi}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 
 async function edit(chatId, msgId, text, telegramApi, kb = null) {
-  const p = { chat_id: chatId, message_id: msgId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
-  if (kb) p.reply_markup = kb;
-  const res = await fetch(`${telegramApi}/editMessageText`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+  const payload = { chat_id: chatId, message_id: msgId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
+  if (kb) payload.reply_markup = kb;
+  const res = await fetch(`${telegramApi}/editMessageText`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   if (!res.ok) return send(chatId, text, telegramApi, kb);
   return res;
 }

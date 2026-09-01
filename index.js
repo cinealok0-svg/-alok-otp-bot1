@@ -1,53 +1,110 @@
 /**
  * Simple Temp Mail Bot — Personal Use Only
  * Platform: Cloudflare Workers
- *
- * Features:
- *  - Generate a disposable email address
- *  - Check inbox / auto-detect OTP
- *  - Two providers: Guerrilla Mail + 1secmail (both free, no signup, no token)
- *
- * No storage, no account vault, no bulk generation.
- * Set BOT_TOKEN as an environment variable / secret before deploying —
- * do not hardcode it in source.
  */
 
-// Guerrilla Mail domains (this API only accepts these specific domains)
+// Guerrilla Mail domains
 const GUERRILLA_DOMAINS = [
   'guerrillamailblock.com',
   'sharklasers.com',
   'grr.la'
 ];
 
-// 1secmail domains (this API only accepts these specific domains)
+// 1secmail domains
 const SECMAIL_DOMAINS = [
   '1secmail.com',
   '1secmail.org',
   '1secmail.net'
 ];
 
-// Combined menu list. Each entry knows which provider it belongs to.
 const DOMAIN_LIST = [...GUERRILLA_DOMAINS, ...SECMAIL_DOMAINS];
 
-export default {
-  async fetch(request, env, ctx) {
-    if (request.method !== "POST") {
-      return new Response("Temp Mail Bot is running.", { status: 200 });
-    }
-    try {
-      const update = await request.json();
-      ctx.waitUntil(handleTelegramUpdate(update, env));
-    } catch (e) {}
-    return new Response("OK", { status: 200 });
-  }
-};
+// ================= MASSIVE REALISTIC FEMALE NAMES LIST =================
+const FEMALE_FIRST_NAMES = [
+  // --- Global / Western / European ---
+  "emma", "olivia", "ava", "sophia", "isabella", "charlotte", "amelia", "mia", "harper", "evelyn",
+  "abigail", "emily", "ella", "elizabeth", "camila", "luna", "sofia", "avery", "mila", "aria",
+  "scarlett", "penelope", "layla", "chloe", "victoria", "madison", "eleanor", "grace", "nora", "riley",
+  "zoey", "hannah", "hazel", "lily", "ellie", "violet", "lillian", "zoe", "stella", "aurora",
+  "natalie", "emilia", "everly", "leah", "aubrey", "willow", "addison", "lucy", "audrey", "bella",
+  "claire", "skylar", "maya", "sarah", "alyssa", "clara", "elena", "julia", "valentina", "isla",
+  "eva", "naomi", "alina", "alessia", "bianca", "celeste", "diana", "fiona", "gemma", "helena",
+  "iris", "jade", "kira", "lara", "melissa", "nina", "paula", "quinn", "rosa", "sienna",
+  "talia", "valeria", "willa", "yasmin", "zara", "amber", "brooke", "carmen", "daisy", "esme",
+  "freya", "georgia", "holly", "ivy", "jessica", "katie", "laura", "molly", "nicole", "paige",
+  "rachel", "samantha", "tessa", "vanessa", "wendy", "alicia", "beatrice", "cassidy", "delilah",
+  "felicity", "giselle", "heidi", "ingrid", "jocelyn", "kendra", "lorelei", "monica", "nadia", "odette",
+  "priscilla", "rebecca", "serena", "tabitha", "veronica", "winona", "yvonne", "zelda", "adelaide", "bridget",
+  // --- Indian / Desi Names ---
+  "aanya", "aadhya", "aarohi", "ananya", "aditi", "diya", "ishita", "kavya", "khushi", "myra",
+  "navya", "pooja", "priya", "riya", "saanvi", "shreya", "sneha", "tanvi", "tanya", "vaishnavi",
+  "anushka", "deepika", "divya", "meera", "neha", "simran", "swati", "kriti", "nisha", "radha",
+  "rashmi", "roshni", "sakshi", "sonam", "sunidhi", "mansi", "komal", "garima", "anjali", "bhavna",
+  "payal", "preeti", "ruhi", "sonali", "sheetal", "pallavi", "kajal", "jyoti", "archana", "muskan",
+  "alka", "amrita", "anita", "asha", "barkha", "chhavi", "damini", "drishti", "ekta", "geetika",
+  "harshita", "heena", "isha", "jhanvi", "juhi", "kanchan", "karishma", "kiran", "latika", "madhu",
+  "mahima", "monika", "nandini", "nidhi", "nikita", "parul", "prachi", "prerna", "ragini", "renu",
+  "ritika", "rupa", "saloni", "sanya", "seema", "shalini", "shikha", "shruti", "smriti", "sonia",
+  "soumya", "srishti", "surbhi", "tanisha", "trisha", "urvashi", "vandana", "vidhi", "yamini", "yashika",
+  // --- Arabic / Middle Eastern & Slavic / Russian ---
+  "aaliyah", "amira", "fatima", "layla", "leila", "mariam", "noor", "samira", "soraya", "zahra",
+  "anastasia", "daria", "ekaterina", "katya", "ksenia", "margarita", "natasha", "olga", "polina", "svetlana",
+  "tatiana", "valery", "viktoria", "yana", "yulia", "amina", "farida", "habiba", "iman", "jasmin"
+];
+
+const FEMALE_LAST_NAMES = [
+  // --- Western / Latin Surnames ---
+  "smith", "johnson", "williams", "brown", "jones", "garcia", "miller", "davis", "rodriguez", "martinez",
+  "hernandez", "lopez", "gonzalez", "wilson", "anderson", "thomas", "taylor", "moore", "jackson", "martin",
+  "lee", "perez", "thompson", "white", "harris", "sanchez", "clark", "ramirez", "lewis", "robinson",
+  "walker", "young", "allen", "king", "wright", "scott", "torres", "nguyen", "hill", "flores",
+  "green", "adams", "nelson", "baker", "hall", "rivera", "campbell", "mitchell", "carter", "roberts",
+  "morales", "foster", "gray", "evans", "stone", "ross", "russell", "cooper", "ward", "peterson",
+  "bailey", "reed", "kelly", "howard", "ramos", "cox", "diaz", "richardson", "wood", "watson",
+  "brooks", "bennett", "gray", "mendoza", "ruiz", "hughes", "price", "alvarez", "castillo", "sanders",
+  "patel", "myers", "long", "ross", "foster", "jimenez", "powell", "jenkins", "perry", "russell",
+  "sullivan", "bell", "coleman", "butler", "henderson", "barnes", "gonzales", "fisher", "vasquez", "simmons",
+  // --- Indian / Desi Surnames ---
+  "sharma", "verma", "gupta", "mehta", "singh", "patel", "shah", "jain", "kapoor", "reddy",
+  "nair", "rao", "joshi", "bhat", "mishra", "pandey", "yadav", "tiwari", "sinha", "das",
+  "saxena", "bose", "sen", "ghosh", "banerjee", "chatterjee", "dutta", "chowdhury", "kaur", "gill",
+  "dhillon", "sandhu", "sidhu", "grewal", "chauhan", "rathore", "shekhawat", "raghav", "tomar", "rawat",
+  "negi", "bhatt", "pant", "agarwal", "bansal", "mittal", "goyal", "garg", "singhal", "mahajan",
+  "kulkarni", "deshmukh", "patil", "pawar", "shinde", "jadhav", "gaikwad", "sawant", "kamble", "more",
+  "menon", "pillai", "kurup", "varma", "nambiar", "shetty", "hegde", "rai", "acharya", "pai",
+  "iyer", "iyengar", "krishnan", "raman", "subramanian", "natarajan", "balan", "swamy", "naidu", "chowdary"
+];
 
 // ================= HELPERS =================
 function getRandomUser() {
-  const chars = 'abcdefghjkmnpqrstuvwxyz';
-  let name = '';
-  for (let i = 0; i < 5; i++) name += chars[Math.floor(Math.random() * chars.length)];
-  return `${name}${Math.floor(1000 + Math.random() * 9000)}`;
+  const first = FEMALE_FIRST_NAMES[Math.floor(Math.random() * FEMALE_FIRST_NAMES.length)];
+  const last = FEMALE_LAST_NAMES[Math.floor(Math.random() * FEMALE_LAST_NAMES.length)];
+  const num2 = Math.floor(10 + Math.random() * 90);
+  const num3 = Math.floor(100 + Math.random() * 900);
+  const num4 = Math.floor(1000 + Math.random() * 9000);
+  const birthYear = Math.floor(1994 + Math.random() * 12); // 1994 - 2005
+
+  // 15+ variations -> Produces over 1,000,000+ realistic permutations
+  const formats = [
+    `${first}.${last}${num2}`,
+    `${first}.${last}${birthYear}`,
+    `${first}_${last}${num2}`,
+    `${first}_${last}${birthYear}`,
+    `${first}${last}${num2}`,
+    `${first}${last}${num3}`,
+    `${first}.${last}`,
+    `${first}${birthYear}`,
+    `${first}_${birthYear}`,
+    `${first}${num4}`,
+    `${first}_${num3}`,
+    `${first}.${last.charAt(0)}${birthYear}`,
+    `${first}${last.charAt(0)}${num3}`,
+    `${first.charAt(0)}.${last}${num2}`,
+    `${first}_official${num2}`,
+    `${first}.real${num2}`
+  ];
+
+  return formats[Math.floor(Math.random() * formats.length)].toLowerCase();
 }
 
 function escapeHtml(str) {
@@ -64,8 +121,21 @@ function extractSmartOtp(text) {
   return match ? (match[1] || match[0]) : null;
 }
 
+// ================= CLOUDFLARE WORKER ROUTER =================
+export default {
+  async fetch(request, env, ctx) {
+    if (request.method !== "POST") {
+      return new Response("Temp Mail Bot is running.", { status: 200 });
+    }
+    try {
+      const update = await request.json();
+      ctx.waitUntil(handleTelegramUpdate(update, env));
+    } catch (e) {}
+    return new Response("OK", { status: 200 });
+  }
+};
+
 // ================= PROVIDER: GUERRILLA MAIL =================
-// f=1 marker used in the callback token
 async function createGuerrillaMailbox(domain) {
   const user = getRandomUser();
   const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
@@ -97,12 +167,8 @@ async function fetchGuerrillaDetail(sid, mailId) {
 }
 
 // ================= PROVIDER: 1SECMAIL =================
-// Simple, well-documented, no auth needed at all.
-// Docs pattern: https://www.1secmail.com/api/v1/?action=...
 async function createSecmailMailbox(domain) {
   const user = getRandomUser();
-  // 1secmail needs no creation step — any login@domain on their domains is
-  // implicitly a valid inbox the moment mail is sent to it.
   return { provider: 's', email: `${user}@${domain}`, login: user, domain };
 }
 
@@ -141,7 +207,6 @@ async function createMailbox(domainChoice = null) {
   try {
     return await createGuerrillaMailbox(domain);
   } catch (e) {
-    // fall back to 1secmail if Guerrilla Mail's API is briefly down
     return createSecmailMailbox(SECMAIL_DOMAINS[0]);
   }
 }
@@ -179,7 +244,7 @@ async function handleTelegramUpdate(update, env) {
     const card =
       `📬 <b>TEMP MAIL BOT</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
-      `Generate a disposable email and check its inbox.`;
+      `Generate a realistic disposable email address and check inboxes for OTPs instantly.`;
     const kb = {
       inline_keyboard: [
         [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
@@ -193,7 +258,6 @@ async function handleTelegramUpdate(update, env) {
   if (data === "gen" || (data && data.startsWith("dgen_"))) {
     const domainChoice = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
     const mb = await createMailbox(domainChoice);
-    // Token format: t:provider:login:domain:sid
     const token = `t:${mb.provider}:${mb.provider === 's' ? mb.login : ''}:${mb.email}:${mb.provider === 'g' ? mb.sid : ''}`;
     const domainName = mb.email.split('@')[1];
 

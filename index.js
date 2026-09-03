@@ -1,7 +1,6 @@
 /**
- * All-In-One Unified Bot: Temp Mail + Instagram Downloader
+ * Ultra-Fast All-In-One Bot: Temp Mail + 1-Sec Instagram Downloader
  * Platform: Cloudflare Workers
- * Runs both systems in a single script
  */
 
 // ================= CONFIGURATION & DOMAINS =================
@@ -89,71 +88,91 @@ function extractSmartOtp(text) {
   return fourDigit ? fourDigit[1] : null;
 }
 
-// ================= INSTAGRAM DOWNLOADER ENGINE =================
-async function fetchInstagramMedia(igUrl) {
-  const cleanUrl = igUrl.split('?')[0];
+// ================= TURBO PARALLEL INSTAGRAM ENGINE =================
+async function fetchInstagramFast(rawUrl) {
+  const cleanUrl = rawUrl.split('?')[0].replace(/\/$/, '');
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const timeoutId = setTimeout(() => controller.abort(), 6500); // 6.5s hard cutoff
 
-  // Engine 1: VKR API
-  try {
-    const res = await fetch(`https://api.vkrdownloader.com/server?v=${encodeURIComponent(cleanUrl)}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (res.ok) {
+  const engines = [
+    // Engine 1: Delirius Turbo API
+    (async () => {
+      const res = await fetch(`https://delirius-apiofc.vercel.app/download/instagram?url=${encodeURIComponent(cleanUrl)}`, { signal });
+      const json = await res.json();
+      const list = json?.data || [];
+      const item = list.find(x => x?.type === 'video' || (x?.url && x.url.includes('.mp4'))) || list[0];
+      if (item?.url) return { videoUrl: item.url, caption: json?.caption || item?.caption || "" };
+      throw new Error();
+    })(),
+
+    // Engine 2: BK9 API
+    (async () => {
+      const res = await fetch(`https://bk9.fun/download/instagram?url=${encodeURIComponent(cleanUrl)}`, { signal });
+      const json = await res.json();
+      const list = json?.BK9 || json?.data || [];
+      const item = Array.isArray(list) ? list[0] : list;
+      const url = item?.url || item?.video;
+      if (url) return { videoUrl: url, caption: json?.caption || "" };
+      throw new Error();
+    })(),
+
+    // Engine 3: VKR Ultra API
+    (async () => {
+      const res = await fetch(`https://api.vkrdownloader.com/server?v=${encodeURIComponent(cleanUrl)}`, {
+        signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
       const json = await res.json();
       if (json?.data?.downloadUrl) {
-        return {
-          videoUrl: json.data.downloadUrl,
-          caption: json.data.title || json.data.description || ""
-        };
+        return { videoUrl: json.data.downloadUrl, caption: json.data.title || json.data.description || "" };
       }
-    }
-  } catch (e) {}
+      throw new Error();
+    })(),
 
-  // Engine 2: Open Media Extractor API
-  try {
-    const res = await fetch(`https://api.siputzx.my.id/api/d/igdl?url=${encodeURIComponent(cleanUrl)}`);
-    if (res.ok) {
+    // Engine 4: Siputzx DL
+    (async () => {
+      const res = await fetch(`https://api.siputzx.my.id/api/d/igdl?url=${encodeURIComponent(cleanUrl)}`, { signal });
       const json = await res.json();
-      if (json?.status && Array.isArray(json.data) && json.data.length > 0) {
-        const item = json.data.find(v => v.url && v.url.includes('.mp4')) || json.data[0];
-        return {
-          videoUrl: item.url,
-          caption: json.caption || ""
-        };
-      }
-    }
-  } catch (e) {}
+      const list = json?.data || [];
+      const item = Array.isArray(list) ? list.find(v => v.url && v.url.includes('.mp4')) || list[0] : list;
+      if (item?.url) return { videoUrl: item.url, caption: json?.caption || "" };
+      throw new Error();
+    })(),
 
-  // Engine 3: Instagram Embed Scraper
-  try {
-    const match = cleanUrl.match(/\/(?:reel|p|tv)\/([a-zA-Z0-9_-]+)/);
-    if (match) {
-      const shortcode = match[1];
-      const embedRes = await fetch(`https://www.instagram.com/p/${shortcode}/embed/captioned/`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        }
+    // Engine 5: Direct Instagram Embed Extraction
+    (async () => {
+      const match = cleanUrl.match(/\/(?:reel|p|tv)\/([a-zA-Z0-9_-]+)/);
+      if (!match) throw new Error();
+      const embedRes = await fetch(`https://www.instagram.com/p/${match[1]}/embed/captioned/`, {
+        signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
       });
-      if (embedRes.ok) {
-        const html = await embedRes.text();
-        const vidMatch = html.match(/"video_url":"([^"]+)"/);
-        const capMatch = html.match(/class="Caption"[^>]*>([\s\S]*?)<\/div>/);
-        let caption = capMatch ? capMatch[1].replace(/<[^>]+>/g, '').trim() : "";
-        if (vidMatch) {
-          return { videoUrl: JSON.parse(`"${vidMatch[1]}"`), caption };
-        }
-      }
-    }
-  } catch (e) {}
+      const html = await embedRes.text();
+      const vidMatch = html.match(/"video_url":"([^"]+)"/);
+      if (!vidMatch) throw new Error();
+      const capMatch = html.match(/class="Caption"[^>]*>([\s\S]*?)<\/div>/);
+      const caption = capMatch ? capMatch[1].replace(/<[^>]+>/g, '').trim() : "";
+      return { videoUrl: JSON.parse(`"${vidMatch[1]}"`), caption };
+    })()
+  ];
 
-  return null;
+  try {
+    // Whichever server responds first wins immediately
+    const result = await Promise.any(engines);
+    clearTimeout(timeoutId);
+    return result;
+  } catch (e) {
+    clearTimeout(timeoutId);
+    return null;
+  }
 }
 
-// ================= WORKER ENTRY POINT =================
+// ================= WORKER ENTRY =================
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("Unified Bot is active.", { status: 200 });
+      return new Response("Bot is active.", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -276,7 +295,7 @@ function decodeToken(tokenStr) {
   };
 }
 
-// ================= HISTORY (KV STORE) =================
+// ================= HISTORY (KV) =================
 async function recordMailboxHistory(env, chatId, email, token) {
   if (!env?.TEMP_MAIL_KV) return;
   try {
@@ -311,7 +330,6 @@ async function handleTelegramUpdate(update, env) {
 
   if (!chatId) return;
 
-  // Clean group bot command suffix (e.g. /start@MyBot -> /start)
   text = text.replace(/@\w+bot/i, '').trim();
 
   if (cb?.id) {
@@ -323,7 +341,7 @@ async function handleTelegramUpdate(update, env) {
   }
 
   // -------------------------------------------------------------
-  // FEATURE 1: INSTAGRAM REEL / VIDEO DOWNLOADER
+  // 1. TURBO INSTAGRAM REEL / VIDEO DOWNLOADER
   // -------------------------------------------------------------
   const igRegex = /(https?:\/\/(?:www\.)?instagram\.com\/(?:reel|p|tv)\/[a-zA-Z0-9_-]+)/i;
   const igMatch = text.match(igRegex);
@@ -332,46 +350,52 @@ async function handleTelegramUpdate(update, env) {
     const igUrl = igMatch[1];
     sendChatAction(chatId, "upload_video", telegramApi);
 
-    const statusMsg = await send(chatId, "⏳ <i>Downloading Reel... Please wait.</i>", telegramApi, null, msg.message_id);
+    // Initial downloading status
+    const statusMsg = await send(chatId, "⚡ <i>Downloading Reel...</i>", telegramApi, null, msg.message_id);
     const statusMsgId = statusMsg ? (await statusMsg.json())?.result?.message_id : null;
 
-    const media = await fetchInstagramMedia(igUrl);
+    // Fast parallel race
+    const media = await fetchInstagramFast(igUrl);
 
     if (media && media.videoUrl) {
       let formattedCaption = "";
       if (media.caption) {
-        let cleanCap = media.caption.length > 800 ? media.caption.slice(0, 800) + "..." : media.caption;
+        let cleanCap = media.caption.length > 700 ? media.caption.slice(0, 700) + "..." : media.caption;
         formattedCaption = `📝 <b>Caption & Tags:</b>\n${escapeHtml(cleanCap)}\n\n`;
       }
-      formattedCaption += `⚡ <i>Downloaded via Bot</i>`;
+      formattedCaption += `⚡ <i>Downloaded Instantly</i>`;
 
-      const videoSent = await sendVideo(chatId, media.videoUrl, formattedCaption, telegramApi, msg.message_id);
+      const videoRes = await sendVideo(chatId, media.videoUrl, formattedCaption, telegramApi, msg.message_id);
+      const vData = await videoRes.json().catch(() => ({}));
 
-      if (videoSent.ok && statusMsgId) {
-        deleteMessage(chatId, statusMsgId, telegramApi);
-      } else if (!videoSent.ok && statusMsgId) {
-        edit(chatId, statusMsgId, `⚠️ <i>Direct send failed. <a href="${media.videoUrl}">Click here to download video</a></i>`, telegramApi);
+      if (vData.ok) {
+        if (statusMsgId) await deleteMessage(chatId, statusMsgId, telegramApi);
+      } else {
+        // Fallback if video is too large for Telegram URL fetch
+        if (statusMsgId) {
+          await edit(chatId, statusMsgId, `🎬 <b>Video Ready</b>\n\n${formattedCaption}`, telegramApi, {
+            inline_keyboard: [[{ text: "▶️ Watch / Save Video", url: media.videoUrl }]]
+          });
+        }
       }
     } else {
       if (statusMsgId) {
-        edit(chatId, statusMsgId, `❌ <i>Video fetch nahi ho paya. Make sure link public account ka ho.</i>`, telegramApi);
+        await edit(chatId, statusMsgId, `❌ <i>Link expire ho gaya ya reel private hai. Kripya dusra link try karein.</i>`, telegramApi);
       }
     }
-    return; // Exit here so temp mail logic won't interfere
+    return;
   }
 
   // -------------------------------------------------------------
-  // FEATURE 2: TEMP MAIL & OTP EXTRACTOR
+  // 2. TEMP MAIL & OTP EXTRACTOR
   // -------------------------------------------------------------
-  
-  // Start / Home Menu
   if (text === "/start" || data === "home") {
     const homeMsg =
       `📬 <b>ALL-IN-ONE BOT READY</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
       `• <b>Temp Mail:</b> Button dabayein aur turant naya email aur OTP lein.\n` +
-      `• <b>Instagram Downloader:</b> Kisi bhi Reel ka link bhejein (DM ya Group me), video aur hashtags mil jayenge!\n\n` +
-      `💡 <b>Restore Email:</b> Purana email wapas open karne ke liye wo address yahan paste kar dein.`;
+      `• <b>Instagram Downloader:</b> Kisi bhi Reel ka link bhejein, 1-2 second me video aur hashtags mil jayenge!\n\n` +
+      `💡 <b>Restore Email:</b> Purana address yahan direct paste kar dein.`;
 
     const kb = {
       inline_keyboard: [
@@ -382,7 +406,7 @@ async function handleTelegramUpdate(update, env) {
     return messageId ? edit(chatId, messageId, homeMsg, telegramApi, kb) : send(chatId, homeMsg, telegramApi, kb);
   }
 
-  // Email restore via pasted address or /restore command
+  // Restore mailbox
   const isEmailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(text);
   const isRestoreCmd = text.startsWith("/restore ") || text.startsWith("/load ");
 
@@ -523,7 +547,6 @@ async function handleTelegramUpdate(update, env) {
 
     const kbRows = [];
 
-    // Native 1-Tap Copy Buttons for extracted OTPs
     for (const code of foundOtps) {
       kbRows.push([{ text: `📋 Copy OTP: ${code}`, copy_text: { text: code } }]);
     }

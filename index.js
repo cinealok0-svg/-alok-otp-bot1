@@ -1,16 +1,16 @@
 /**
- * Simple Temp Mail Bot — Personal Use Only
+ * All-In-One Unified Bot: Temp Mail + Instagram Downloader
  * Platform: Cloudflare Workers
+ * Runs both systems in a single script
  */
 
-// Guerrilla Mail domains
+// ================= CONFIGURATION & DOMAINS =================
 const GUERRILLA_DOMAINS = [
   'guerrillamailblock.com',
   'sharklasers.com',
   'grr.la'
 ];
 
-// 1secmail domains
 const SECMAIL_DOMAINS = [
   '1secmail.com',
   '1secmail.org',
@@ -19,60 +19,21 @@ const SECMAIL_DOMAINS = [
 
 const DOMAIN_LIST = [...GUERRILLA_DOMAINS, ...SECMAIL_DOMAINS];
 
-// ================= MASSIVE REALISTIC FEMALE NAMES LIST =================
+// Realistic names pool
 const FEMALE_FIRST_NAMES = [
-  // --- Global / Western / European ---
   "emma", "olivia", "ava", "sophia", "isabella", "charlotte", "amelia", "mia", "harper", "evelyn",
   "abigail", "emily", "ella", "elizabeth", "camila", "luna", "sofia", "avery", "mila", "aria",
   "scarlett", "penelope", "layla", "chloe", "victoria", "madison", "eleanor", "grace", "nora", "riley",
   "zoey", "hannah", "hazel", "lily", "ellie", "violet", "lillian", "zoe", "stella", "aurora",
   "natalie", "emilia", "everly", "leah", "aubrey", "willow", "addison", "lucy", "audrey", "bella",
-  "claire", "skylar", "maya", "sarah", "alyssa", "clara", "elena", "julia", "valentina", "isla",
-  "eva", "naomi", "alina", "alessia", "bianca", "celeste", "diana", "fiona", "gemma", "helena",
-  "iris", "jade", "kira", "lara", "melissa", "nina", "paula", "quinn", "rosa", "sienna",
-  "talia", "valeria", "willa", "yasmin", "zara", "amber", "brooke", "carmen", "daisy", "esme",
-  "freya", "georgia", "holly", "ivy", "jessica", "katie", "laura", "molly", "nicole", "paige",
-  "rachel", "samantha", "tessa", "vanessa", "wendy", "alicia", "beatrice", "cassidy", "delilah",
-  "felicity", "giselle", "heidi", "ingrid", "jocelyn", "kendra", "lorelei", "monica", "nadia", "odette",
-  "priscilla", "rebecca", "serena", "tabitha", "veronica", "winona", "yvonne", "zelda", "adelaide", "bridget",
-  // --- Indian / Desi Names ---
   "aanya", "aadhya", "aarohi", "ananya", "aditi", "diya", "ishita", "kavya", "khushi", "myra",
-  "navya", "pooja", "priya", "riya", "saanvi", "shreya", "sneha", "tanvi", "tanya", "vaishnavi",
-  "anushka", "deepika", "divya", "meera", "neha", "simran", "swati", "kriti", "nisha", "radha",
-  "rashmi", "roshni", "sakshi", "sonam", "sunidhi", "mansi", "komal", "garima", "anjali", "bhavna",
-  "payal", "preeti", "ruhi", "sonali", "sheetal", "pallavi", "kajal", "jyoti", "archana", "muskan",
-  "alka", "amrita", "anita", "asha", "barkha", "chhavi", "damini", "drishti", "ekta", "geetika",
-  "harshita", "heena", "isha", "jhanvi", "juhi", "kanchan", "karishma", "kiran", "latika", "madhu",
-  "mahima", "monika", "nandini", "nidhi", "nikita", "parul", "prachi", "prerna", "ragini", "renu",
-  "ritika", "rupa", "saloni", "sanya", "seema", "shalini", "shikha", "shruti", "smriti", "sonia",
-  "soumya", "srishti", "surbhi", "tanisha", "trisha", "urvashi", "vandana", "vidhi", "yamini", "yashika",
-  // --- Arabic / Middle Eastern & Slavic / Russian ---
-  "aaliyah", "amira", "fatima", "layla", "leila", "mariam", "noor", "samira", "soraya", "zahra",
-  "anastasia", "daria", "ekaterina", "katya", "ksenia", "margarita", "natasha", "olga", "polina", "svetlana",
-  "tatiana", "valery", "viktoria", "yana", "yulia", "amina", "farida", "habiba", "iman", "jasmin"
+  "navya", "pooja", "priya", "riya", "saanvi", "shreya", "sneha", "tanvi", "tanya", "vaishnavi"
 ];
 
 const FEMALE_LAST_NAMES = [
-  // --- Western / Latin Surnames ---
   "smith", "johnson", "williams", "brown", "jones", "garcia", "miller", "davis", "rodriguez", "martinez",
   "hernandez", "lopez", "gonzalez", "wilson", "anderson", "thomas", "taylor", "moore", "jackson", "martin",
-  "lee", "perez", "thompson", "white", "harris", "sanchez", "clark", "ramirez", "lewis", "robinson",
-  "walker", "young", "allen", "king", "wright", "scott", "torres", "nguyen", "hill", "flores",
-  "green", "adams", "nelson", "baker", "hall", "rivera", "campbell", "mitchell", "carter", "roberts",
-  "morales", "foster", "gray", "evans", "stone", "ross", "russell", "cooper", "ward", "peterson",
-  "bailey", "reed", "kelly", "howard", "ramos", "cox", "diaz", "richardson", "wood", "watson",
-  "brooks", "bennett", "gray", "mendoza", "ruiz", "hughes", "price", "alvarez", "castillo", "sanders",
-  "patel", "myers", "long", "ross", "foster", "jimenez", "powell", "jenkins", "perry", "russell",
-  "sullivan", "bell", "coleman", "butler", "henderson", "barnes", "gonzales", "fisher", "vasquez", "simmons",
-  // --- Indian / Desi Surnames ---
-  "sharma", "verma", "gupta", "mehta", "singh", "patel", "shah", "jain", "kapoor", "reddy",
-  "nair", "rao", "joshi", "bhat", "mishra", "pandey", "yadav", "tiwari", "sinha", "das",
-  "saxena", "bose", "sen", "ghosh", "banerjee", "chatterjee", "dutta", "chowdhury", "kaur", "gill",
-  "dhillon", "sandhu", "sidhu", "grewal", "chauhan", "rathore", "shekhawat", "raghav", "tomar", "rawat",
-  "negi", "bhatt", "pant", "agarwal", "bansal", "mittal", "goyal", "garg", "singhal", "mahajan",
-  "kulkarni", "deshmukh", "patil", "pawar", "shinde", "jadhav", "gaikwad", "sawant", "kamble", "more",
-  "menon", "pillai", "kurup", "varma", "nambiar", "shetty", "hegde", "rai", "acharya", "pai",
-  "iyer", "iyengar", "krishnan", "raman", "subramanian", "natarajan", "balan", "swamy", "naidu", "chowdary"
+  "sharma", "verma", "gupta", "mehta", "singh", "patel", "shah", "jain", "kapoor", "reddy"
 ];
 
 // ================= HELPERS =================
@@ -80,52 +41,119 @@ function getRandomUser() {
   const first = FEMALE_FIRST_NAMES[Math.floor(Math.random() * FEMALE_FIRST_NAMES.length)];
   const last = FEMALE_LAST_NAMES[Math.floor(Math.random() * FEMALE_LAST_NAMES.length)];
   const num2 = Math.floor(10 + Math.random() * 90);
-  const num3 = Math.floor(100 + Math.random() * 900);
-  const num4 = Math.floor(1000 + Math.random() * 9000);
-  const birthYear = Math.floor(1994 + Math.random() * 12); // 1994 - 2005
+  const birthYear = Math.floor(1995 + Math.random() * 11);
 
-  // 15+ variations -> Produces over 1,000,000+ realistic permutations
   const formats = [
     `${first}.${last}${num2}`,
     `${first}.${last}${birthYear}`,
     `${first}_${last}${num2}`,
-    `${first}_${last}${birthYear}`,
     `${first}${last}${num2}`,
-    `${first}${last}${num3}`,
     `${first}.${last}`,
-    `${first}${birthYear}`,
-    `${first}_${birthYear}`,
-    `${first}${num4}`,
-    `${first}_${num3}`,
-    `${first}.${last.charAt(0)}${birthYear}`,
-    `${first}${last.charAt(0)}${num3}`,
-    `${first.charAt(0)}.${last}${num2}`,
-    `${first}_official${num2}`,
-    `${first}.real${num2}`
+    `${first}${birthYear}`
   ];
 
   return formats[Math.floor(Math.random() * formats.length)].toLowerCase();
 }
 
 function escapeHtml(str) {
-  return (str || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function extractSmartOtp(text) {
   if (!text) return null;
-  const clean = text.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ');
-  const match =
-    clean.match(/(?:OTP|code|verification code|passcode|secret code|pin|c\u00f3digo|pin code)\D{0,14}(\d{4,8})/i) ||
-    clean.match(/\b\d{6,8}\b/) ||
-    clean.match(/\b\d{4}\b/);
-  return match ? (match[1] || match[0]) : null;
+  const clean = String(text)
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ');
+
+  const postMatch = clean.match(/(?:otp|code|verification(?:\s*code)?|passcode|pin|security\s*code|c[oó]digo|pin\s*code)\s*(?:is|:|-|=|\s)\s*([0-9]{4,8})\b/i);
+  if (postMatch) return postMatch[1];
+
+  const preMatch = clean.match(/\b([0-9]{4,8})\b\s*(?:is\s+(?:your\s+)?)?(?:otp|code|verification|passcode|pin|security\s*code)/i);
+  if (preMatch) return preMatch[1];
+
+  const nearbyMatch = clean.match(/(?:otp|code|verification|passcode|c[oó]digo)\D{1,15}\b([0-9]{4,8})\b/i);
+  if (nearbyMatch) return nearbyMatch[1];
+
+  const sixDigit = clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{6,8})\b/);
+  if (sixDigit) return sixDigit[1];
+
+  const fourDigit = clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{4,5})\b/);
+  return fourDigit ? fourDigit[1] : null;
 }
 
-// ================= CLOUDFLARE WORKER ROUTER =================
+// ================= INSTAGRAM DOWNLOADER ENGINE =================
+async function fetchInstagramMedia(igUrl) {
+  const cleanUrl = igUrl.split('?')[0];
+
+  // Engine 1: VKR API
+  try {
+    const res = await fetch(`https://api.vkrdownloader.com/server?v=${encodeURIComponent(cleanUrl)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.data?.downloadUrl) {
+        return {
+          videoUrl: json.data.downloadUrl,
+          caption: json.data.title || json.data.description || ""
+        };
+      }
+    }
+  } catch (e) {}
+
+  // Engine 2: Open Media Extractor API
+  try {
+    const res = await fetch(`https://api.siputzx.my.id/api/d/igdl?url=${encodeURIComponent(cleanUrl)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.status && Array.isArray(json.data) && json.data.length > 0) {
+        const item = json.data.find(v => v.url && v.url.includes('.mp4')) || json.data[0];
+        return {
+          videoUrl: item.url,
+          caption: json.caption || ""
+        };
+      }
+    }
+  } catch (e) {}
+
+  // Engine 3: Instagram Embed Scraper
+  try {
+    const match = cleanUrl.match(/\/(?:reel|p|tv)\/([a-zA-Z0-9_-]+)/);
+    if (match) {
+      const shortcode = match[1];
+      const embedRes = await fetch(`https://www.instagram.com/p/${shortcode}/embed/captioned/`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+      });
+      if (embedRes.ok) {
+        const html = await embedRes.text();
+        const vidMatch = html.match(/"video_url":"([^"]+)"/);
+        const capMatch = html.match(/class="Caption"[^>]*>([\s\S]*?)<\/div>/);
+        let caption = capMatch ? capMatch[1].replace(/<[^>]+>/g, '').trim() : "";
+        if (vidMatch) {
+          return { videoUrl: JSON.parse(`"${vidMatch[1]}"`), caption };
+        }
+      }
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+// ================= WORKER ENTRY POINT =================
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("Temp Mail Bot is running.", { status: 200 });
+      return new Response("Unified Bot is active.", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -136,23 +164,31 @@ export default {
 };
 
 // ================= PROVIDER: GUERRILLA MAIL =================
-async function createGuerrillaMailbox(domain) {
-  const user = getRandomUser();
-  const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
-  const sid = init.sid_token || '';
-  const setRes = await fetch(
-    `https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`
-  ).then(r => r.json());
-  return { provider: 'g', email: (setRes.email_addr || `${user}@${domain}`).toLowerCase(), sid };
+async function createGuerrillaMailbox(domain, customUser = null) {
+  const user = customUser || getRandomUser();
+  try {
+    const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
+    const sid = init.sid_token || '';
+    const setRes = await fetch(
+      `https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(user)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`
+    ).then(r => r.json());
+    return { provider: 'g', email: (setRes.email_addr || `${user}@${domain}`).toLowerCase(), sid, domain };
+  } catch (e) {
+    return createSecmailMailbox(SECMAIL_DOMAINS[0], user);
+  }
 }
 
 async function fetchGuerrillaMessages(sid) {
   try {
     const res = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${sid}`).then(r => r.json());
-    return (res.list || [])
+    const email = (res.email_addr || '').toLowerCase();
+    const list = (res.list || [])
       .filter(m => m.mail_from !== 'no-reply@guerrillamail.com')
       .map(m => ({ id: m.mail_id, from: m.mail_from, subject: m.mail_subject }));
-  } catch (e) { return []; }
+    return { list, email };
+  } catch (e) {
+    return { list: [], email: '' };
+  }
 }
 
 async function fetchGuerrillaDetail(sid, mailId) {
@@ -163,13 +199,15 @@ async function fetchGuerrillaDetail(sid, mailId) {
       subject: data.mail_subject || '(No Subject)',
       body: data.mail_body || ''
     };
-  } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
+  } catch (e) {
+    return { from: 'Unknown', subject: '', body: '' };
+  }
 }
 
 // ================= PROVIDER: 1SECMAIL =================
-async function createSecmailMailbox(domain) {
-  const user = getRandomUser();
-  return { provider: 's', email: `${user}@${domain}`, login: user, domain };
+async function createSecmailMailbox(domain, customUser = null) {
+  const user = (customUser || getRandomUser()).toLowerCase();
+  return { provider: 's', email: `${user}@${domain}`.toLowerCase(), login: user, domain };
 }
 
 async function fetchSecmailMessages(login, domain) {
@@ -177,10 +215,15 @@ async function fetchSecmailMessages(login, domain) {
     const res = await fetch(
       `https://www.1secmail.com/api/v1/?action=getMessages&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}`
     );
-    if (!res.ok) return [];
+    if (!res.ok) return { list: [], email: `${login}@${domain}` };
     const list = await res.json();
-    return (list || []).map(m => ({ id: m.id, from: m.from, subject: m.subject }));
-  } catch (e) { return []; }
+    return {
+      list: (list || []).map(m => ({ id: m.id, from: m.from, subject: m.subject })),
+      email: `${login}@${domain}`
+    };
+  } catch (e) {
+    return { list: [], email: `${login}@${domain}` };
+  }
 }
 
 async function fetchSecmailDetail(login, domain, mailId) {
@@ -195,41 +238,81 @@ async function fetchSecmailDetail(login, domain, mailId) {
       subject: data.subject || '(No Subject)',
       body: data.textBody || data.htmlBody || data.body || ''
     };
-  } catch (e) { return { from: 'Unknown', subject: '', body: '' }; }
+  } catch (e) {
+    return { from: 'Unknown', subject: '', body: '' };
+  }
 }
 
-// ================= DISPATCH =================
+// ================= DISPATCH & RESTORE =================
 async function createMailbox(domainChoice = null) {
   const domain = domainChoice || DOMAIN_LIST[Math.floor(Math.random() * DOMAIN_LIST.length)];
-  if (SECMAIL_DOMAINS.includes(domain)) {
-    return createSecmailMailbox(domain);
-  }
+  return SECMAIL_DOMAINS.includes(domain) ? createSecmailMailbox(domain) : createGuerrillaMailbox(domain);
+}
+
+async function restoreMailbox(fullEmail) {
+  const clean = fullEmail.trim().toLowerCase();
+  const parts = clean.split('@');
+  if (parts.length !== 2) return null;
+  const login = parts[0];
+  const domain = parts[1];
+
+  if (SECMAIL_DOMAINS.includes(domain)) return createSecmailMailbox(domain, login);
+  if (GUERRILLA_DOMAINS.includes(domain)) return createGuerrillaMailbox(domain, login);
+  return createSecmailMailbox(SECMAIL_DOMAINS[0], login);
+}
+
+function encodeToken(provider, domain, extra) {
+  let dIdx = DOMAIN_LIST.indexOf(domain);
+  if (dIdx === -1) dIdx = 0;
+  return `c:${provider}:${dIdx}:${extra}`;
+}
+
+function decodeToken(tokenStr) {
+  const parts = tokenStr.split(':');
+  return {
+    provider: parts[1],
+    domain: DOMAIN_LIST[parseInt(parts[2], 10)] || DOMAIN_LIST[0],
+    extra: parts[3]
+  };
+}
+
+// ================= HISTORY (KV STORE) =================
+async function recordMailboxHistory(env, chatId, email, token) {
+  if (!env?.TEMP_MAIL_KV) return;
   try {
-    return await createGuerrillaMailbox(domain);
+    const key = `h_${chatId}`;
+    const raw = await env.TEMP_MAIL_KV.get(key);
+    let list = raw ? JSON.parse(raw) : [];
+    list = list.filter(item => item.email !== email);
+    list.unshift({ email, token, time: Date.now() });
+    await env.TEMP_MAIL_KV.put(key, JSON.stringify(list.slice(0, 5)), { expirationTtl: 604800 });
+  } catch (e) {}
+}
+
+async function getMailboxHistory(env, chatId) {
+  if (!env?.TEMP_MAIL_KV) return [];
+  try {
+    const raw = await env.TEMP_MAIL_KV.get(`h_${chatId}`);
+    return raw ? JSON.parse(raw) : [];
   } catch (e) {
-    return createSecmailMailbox(SECMAIL_DOMAINS[0]);
+    return [];
   }
 }
 
-async function fetchMessages(provider, login, domain, sid) {
-  return provider === 's' ? fetchSecmailMessages(login, domain) : fetchGuerrillaMessages(sid);
-}
-
-async function fetchDetail(provider, login, domain, sid, mailId) {
-  return provider === 's' ? fetchSecmailDetail(login, domain, mailId) : fetchGuerrillaDetail(sid, mailId);
-}
-
-// ================= TELEGRAM ROUTER =================
+// ================= MAIN TELEGRAM ROUTER =================
 async function handleTelegramUpdate(update, env) {
   const telegramApi = `https://api.telegram.org/bot${env.BOT_TOKEN}`;
   const msg = update.message;
   const cb = update.callback_query;
   const chatId = msg?.chat?.id || cb?.message?.chat?.id;
   const messageId = cb?.message?.message_id;
-  const text = msg?.text?.trim();
+  let text = msg?.text?.trim() || "";
   const data = cb?.data;
 
   if (!chatId) return;
+
+  // Clean group bot command suffix (e.g. /start@MyBot -> /start)
+  text = text.replace(/@\w+bot/i, '').trim();
 
   if (cb?.id) {
     await fetch(`${telegramApi}/answerCallbackQuery`, {
@@ -239,114 +322,273 @@ async function handleTelegramUpdate(update, env) {
     }).catch(() => {});
   }
 
-  // Home / Start
+  // -------------------------------------------------------------
+  // FEATURE 1: INSTAGRAM REEL / VIDEO DOWNLOADER
+  // -------------------------------------------------------------
+  const igRegex = /(https?:\/\/(?:www\.)?instagram\.com\/(?:reel|p|tv)\/[a-zA-Z0-9_-]+)/i;
+  const igMatch = text.match(igRegex);
+
+  if (igMatch) {
+    const igUrl = igMatch[1];
+    sendChatAction(chatId, "upload_video", telegramApi);
+
+    const statusMsg = await send(chatId, "⏳ <i>Downloading Reel... Please wait.</i>", telegramApi, null, msg.message_id);
+    const statusMsgId = statusMsg ? (await statusMsg.json())?.result?.message_id : null;
+
+    const media = await fetchInstagramMedia(igUrl);
+
+    if (media && media.videoUrl) {
+      let formattedCaption = "";
+      if (media.caption) {
+        let cleanCap = media.caption.length > 800 ? media.caption.slice(0, 800) + "..." : media.caption;
+        formattedCaption = `📝 <b>Caption & Tags:</b>\n${escapeHtml(cleanCap)}\n\n`;
+      }
+      formattedCaption += `⚡ <i>Downloaded via Bot</i>`;
+
+      const videoSent = await sendVideo(chatId, media.videoUrl, formattedCaption, telegramApi, msg.message_id);
+
+      if (videoSent.ok && statusMsgId) {
+        deleteMessage(chatId, statusMsgId, telegramApi);
+      } else if (!videoSent.ok && statusMsgId) {
+        edit(chatId, statusMsgId, `⚠️ <i>Direct send failed. <a href="${media.videoUrl}">Click here to download video</a></i>`, telegramApi);
+      }
+    } else {
+      if (statusMsgId) {
+        edit(chatId, statusMsgId, `❌ <i>Video fetch nahi ho paya. Make sure link public account ka ho.</i>`, telegramApi);
+      }
+    }
+    return; // Exit here so temp mail logic won't interfere
+  }
+
+  // -------------------------------------------------------------
+  // FEATURE 2: TEMP MAIL & OTP EXTRACTOR
+  // -------------------------------------------------------------
+  
+  // Start / Home Menu
   if (text === "/start" || data === "home") {
-    const card =
-      `📬 <b>TEMP MAIL BOT</b>\n` +
+    const homeMsg =
+      `📬 <b>ALL-IN-ONE BOT READY</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
-      `Generate a realistic disposable email address and check inboxes for OTPs instantly.`;
+      `• <b>Temp Mail:</b> Button dabayein aur turant naya email aur OTP lein.\n` +
+      `• <b>Instagram Downloader:</b> Kisi bhi Reel ka link bhejein (DM ya Group me), video aur hashtags mil jayenge!\n\n` +
+      `💡 <b>Restore Email:</b> Purana email wapas open karne ke liye wo address yahan paste kar dein.`;
+
     const kb = {
       inline_keyboard: [
         [{ text: "⚡ Generate Temp Mail", callback_data: "gen" }],
-        [{ text: "🌐 Switch Domain", callback_data: "domains" }]
+        [{ text: "📜 My History", callback_data: "history" }, { text: "🌐 Switch Domain", callback_data: "domains" }]
       ]
     };
-    return messageId ? edit(chatId, messageId, card, telegramApi, kb) : send(chatId, card, telegramApi, kb);
+    return messageId ? edit(chatId, messageId, homeMsg, telegramApi, kb) : send(chatId, homeMsg, telegramApi, kb);
   }
 
-  // Generate mailbox
-  if (data === "gen" || (data && data.startsWith("dgen_"))) {
-    const domainChoice = data.startsWith("dgen_") ? data.replace("dgen_", "") : null;
+  // Email restore via pasted address or /restore command
+  const isEmailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(text);
+  const isRestoreCmd = text.startsWith("/restore ") || text.startsWith("/load ");
+
+  if (isEmailPattern || isRestoreCmd) {
+    const targetEmail = isRestoreCmd ? text.split(/\s+/)[1] : text;
+    const mb = await restoreMailbox(targetEmail);
+    if (!mb) {
+      return send(chatId, `⚠️ <b>Invalid Email Format</b>\nExample: <code>name@sharklasers.com</code>`, telegramApi);
+    }
+
+    const token = encodeToken(mb.provider, mb.domain, mb.provider === 's' ? mb.login : mb.sid);
+    await recordMailboxHistory(env, chatId, mb.email, token);
+
+    const out =
+      `🔄 <b>MAILBOX RESTORED</b>\n` +
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <b>Email:</b>\n<code>${escapeHtml(mb.email)}</code>\n\n` +
+      `📡 <b>Status:</b> Ready\n` +
+      `⏳ <i>OTP aane ke baad Check Inbox dabayein:</i>`;
+
+    return send(chatId, out, telegramApi, {
+      inline_keyboard: [
+        [{ text: "📋 Copy Email", copy_text: { text: mb.email } }],
+        [{ text: "📩 Check Inbox", callback_data: token }],
+        [{ text: "📜 My History", callback_data: "history" }, { text: "🏠 Home", callback_data: "home" }]
+      ]
+    });
+  }
+
+  // History list
+  if (data === "history") {
+    const history = await getMailboxHistory(env, chatId);
+    if (!history || history.length === 0) {
+      return edit(chatId, messageId,
+        `📜 <b>RECENT MAILBOXES</b>\n━━━━━━━━━━━━━━━━━━\nKoi saved address nahi mila.\n\n💡 <i>Purana email chat me bhej kar restore karein.</i>`,
+        telegramApi,
+        {
+          inline_keyboard: [
+            [{ text: "⚡ Generate New Mail", callback_data: "gen" }],
+            [{ text: "🏠 Home", callback_data: "home" }]
+          ]
+        }
+      );
+    }
+
+    const kbRows = history.map(item => [{ text: `📧 ${item.email}`, callback_data: item.token }]);
+    kbRows.push([{ text: "⚡ Generate New Mail", callback_data: "gen" }, { text: "🏠 Home", callback_data: "home" }]);
+
+    return edit(chatId, messageId,
+      `📜 <b>RECENT MAILBOXES (Tap to open)</b>\n━━━━━━━━━━━━━━━━━━\nInbox check karne ke liye email select karein:`,
+      telegramApi,
+      { inline_keyboard: kbRows }
+    );
+  }
+
+  // Generate new email
+  if (data === "gen" || (data && data.startsWith("dg:"))) {
+    let domainChoice = null;
+    if (data.startsWith("dg:")) {
+      const idx = parseInt(data.split(":")[1], 10);
+      domainChoice = DOMAIN_LIST[idx] || null;
+    }
+
     const mb = await createMailbox(domainChoice);
-    const token = `t:${mb.provider}:${mb.provider === 's' ? mb.login : ''}:${mb.email}:${mb.provider === 'g' ? mb.sid : ''}`;
-    const domainName = mb.email.split('@')[1];
+    const token = encodeToken(mb.provider, mb.domain, mb.provider === 's' ? mb.login : mb.sid);
+    await recordMailboxHistory(env, chatId, mb.email, token);
 
     const out =
       `📬 <b>DISPOSABLE ADDRESS READY</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n\n` +
-      `📧 <b>Email:</b>\n<code>${mb.email}</code>\n\n` +
-      `📡 <b>Server:</b> <code>${domainName}</code>\n` +
-      `⏳ <i>Tap below to check inbox.</i>`;
+      `📧 <b>Email:</b>\n<code>${escapeHtml(mb.email)}</code>\n\n` +
+      `📡 <b>Server:</b> <code>${escapeHtml(mb.domain)}</code>\n` +
+      `⏳ <i>OTP aane ke baad Check Inbox par tap karein.</i>`;
 
     return edit(chatId, messageId, out, telegramApi, {
       inline_keyboard: [
+        [{ text: "📋 Copy Email", copy_text: { text: mb.email } }],
         [{ text: "📩 Check Inbox", callback_data: token }],
-        [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🌐 Switch Domain", callback_data: "domains" }],
-        [{ text: "🏠 Home", callback_data: "home" }]
+        [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "📜 History", callback_data: "history" }],
+        [{ text: "🌐 Switch Domain", callback_data: "domains" }, { text: "🏠 Home", callback_data: "home" }]
       ]
     });
   }
 
   // Check inbox
-  if (data && data.startsWith("t:")) {
-    const parts = data.split(":");
-    const provider = parts[1];
-    const login = parts[2];
-    const email = parts[3];
-    const sid = parts[4] || '';
-    const domain = email.split('@')[1];
+  if (data && data.startsWith("c:")) {
+    const { provider, domain, extra } = decodeToken(data);
 
-    const list = await fetchMessages(provider, login, domain, sid);
+    let messages = [];
+    let mailboxEmail = "";
 
-    if (!list || list.length === 0) {
+    if (provider === 's') {
+      const res = await fetchSecmailMessages(extra, domain);
+      messages = res.list;
+      mailboxEmail = res.email;
+    } else {
+      const res = await fetchGuerrillaMessages(extra);
+      messages = res.list;
+      mailboxEmail = res.email || `address@${domain}`;
+    }
+
+    if (!messages || messages.length === 0) {
       return edit(chatId, messageId,
-        `📭 <b>No messages yet</b>\n\n📧 <code>${email}</code>\n\n<i>Tap refresh to check again.</i>`,
+        `📭 <b>No messages yet</b>\n\n📧 <code>${escapeHtml(mailboxEmail)}</code>\n\n<i>Thoda wait karke Refresh dabayein.</i>`,
         telegramApi,
         {
           inline_keyboard: [
-            [{ text: "🔄 Refresh", callback_data: data }],
-            [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home", callback_data: "home" }]
+            [{ text: "📋 Copy Email", copy_text: { text: mailboxEmail } }],
+            [{ text: "🔄 Refresh Inbox", callback_data: data }],
+            [{ text: "⚡ New Mail", callback_data: "gen" }, { text: "📜 History", callback_data: "history" }],
+            [{ text: "🏠 Home", callback_data: "home" }]
           ]
         });
     }
 
-    let report = `📬 <b>INBOX (${list.length})</b>\n━━━━━━━━━━━━━━━━━━\n📧 <code>${email}</code>\n\n`;
-    let detectedOtp = null;
+    let report = `📬 <b>INBOX (${messages.length})</b>\n━━━━━━━━━━━━━━━━━━\n📧 <code>${escapeHtml(mailboxEmail)}</code>\n\n`;
+    const foundOtps = [];
 
-    for (let i = 0; i < Math.min(list.length, 3); i++) {
-      const detail = await fetchDetail(provider, login, domain, sid, list[i].id);
-      const mail = {
-        from: detail.from !== 'Unknown' ? detail.from : (list[i].from || 'Unknown'),
-        subject: detail.subject || list[i].subject || '(No Subject)',
-        body: detail.body
-      };
-      const fullText = (mail.subject || "") + " " + (mail.body || "");
+    for (let i = 0; i < Math.min(messages.length, 3); i++) {
+      const detail = provider === 's'
+        ? await fetchSecmailDetail(extra, domain, messages[i].id)
+        : await fetchGuerrillaDetail(extra, messages[i].id);
+
+      const sender = detail.from !== 'Unknown' ? detail.from : (messages[i].from || 'Unknown');
+      const subject = detail.subject || messages[i].subject || '(No Subject)';
+      const fullText = subject + " " + (detail.body || "");
+
       const otp = extractSmartOtp(fullText);
-      if (otp && !detectedOtp) detectedOtp = otp;
+      if (otp && !foundOtps.includes(otp)) {
+        foundOtps.push(otp);
+      }
 
-      report += `📩 <b>From:</b> <code>${escapeHtml(mail.from)}</code>\n`;
-      report += `📝 <b>Subject:</b> <i>${escapeHtml(mail.subject)}</i>\n`;
-      if (otp) report += `🔑 <b>OTP:</b> <code>${otp}</code>\n`;
+      report += `📩 <b>From:</b> <code>${escapeHtml(sender.slice(0, 45))}</code>\n`;
+      report += `📝 <b>Subject:</b> <i>${escapeHtml(subject.slice(0, 80))}</i>\n`;
+      if (otp) report += `🔑 <b>OTP:</b> <code>${escapeHtml(otp)}</code>\n`;
       report += `━━━━━━━━━━━━━━━━━━\n`;
     }
 
-    const kbRows = [[{ text: "🔄 Refresh", callback_data: data }]];
-    kbRows.push([{ text: "⚡ New Mail", callback_data: "gen" }, { text: "🏠 Home", callback_data: "home" }]);
+    const kbRows = [];
+
+    // Native 1-Tap Copy Buttons for extracted OTPs
+    for (const code of foundOtps) {
+      kbRows.push([{ text: `📋 Copy OTP: ${code}`, copy_text: { text: code } }]);
+    }
+
+    kbRows.push([
+      { text: "🔄 Refresh", callback_data: data },
+      { text: "📋 Copy Email", copy_text: { text: mailboxEmail } }
+    ]);
+    kbRows.push([
+      { text: "⚡ New Mail", callback_data: "gen" },
+      { text: "📜 History", callback_data: "history" }
+    ]);
+    kbRows.push([{ text: "🏠 Home", callback_data: "home" }]);
+
     return edit(chatId, messageId, report, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // Domain switcher
+  // Switch domain
   if (data === "domains") {
     const rows = [];
     for (let i = 0; i < DOMAIN_LIST.length; i += 2) {
-      const row = [{ text: `@${DOMAIN_LIST[i]}`, callback_data: `dgen_${DOMAIN_LIST[i]}` }];
-      if (DOMAIN_LIST[i + 1]) row.push({ text: `@${DOMAIN_LIST[i + 1]}`, callback_data: `dgen_${DOMAIN_LIST[i + 1]}` });
+      const row = [{ text: `@${DOMAIN_LIST[i]}`, callback_data: `dg:${i}` }];
+      if (DOMAIN_LIST[i + 1]) {
+        row.push({ text: `@${DOMAIN_LIST[i + 1]}`, callback_data: `dg:${i + 1}` });
+      }
       rows.push(row);
     }
     rows.push([{ text: "🏠 Home", callback_data: "home" }]);
-    return edit(chatId, messageId, `🌐 <b>Select Domain:</b>`, telegramApi, { inline_keyboard: rows });
+    return edit(chatId, messageId, `🌐 <b>Select Domain Server:</b>`, telegramApi, { inline_keyboard: rows });
   }
 }
 
-// ================= TELEGRAM SEND HELPERS =================
-async function send(chatId, text, telegramApi, kb = null) {
+// ================= DISPATCH METHODS =================
+async function send(chatId, text, telegramApi, kb = null, replyToId = null) {
   const payload = { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true };
   if (kb) payload.reply_markup = kb;
+  if (replyToId) payload.reply_to_message_id = replyToId;
   return fetch(`${telegramApi}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+}
+
+async function sendVideo(chatId, videoUrl, caption, telegramApi, replyToId = null) {
+  const payload = {
+    chat_id: chatId,
+    video: videoUrl,
+    caption: caption,
+    parse_mode: "HTML"
+  };
+  if (replyToId) payload.reply_to_message_id = replyToId;
+  return fetch(`${telegramApi}/sendVideo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+async function sendChatAction(chatId, action, telegramApi) {
+  return fetch(`${telegramApi}/sendChatAction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, action })
+  }).catch(() => {});
 }
 
 async function edit(chatId, msgId, text, telegramApi, kb = null) {
@@ -359,4 +601,12 @@ async function edit(chatId, msgId, text, telegramApi, kb = null) {
   });
   if (!res.ok) return send(chatId, text, telegramApi, kb);
   return res;
+}
+
+async function deleteMessage(chatId, messageId, telegramApi) {
+  return fetch(`${telegramApi}/deleteMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId })
+  }).catch(() => {});
 }

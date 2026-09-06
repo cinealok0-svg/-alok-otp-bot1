@@ -1,8 +1,13 @@
 /**
- * Production Bot (DongvanFB API Key Enabled)
- * Key: 2Vwu7ROX0jNK7J00kbo5fnhxw
+ * All-In-One Enterprise Bot (Automatic Non-Stop Auto-Push Engine)
+ * Features:
+ *  - Real-Time Background Live Listener (Auto-Pushes OTP instantly)
+ *  - Dual Resolver (Direct Microsoft Graph + DongvanFB API Key)
+ *  - Zero Duplicate Channel Database Ledger
+ *  - 1-Tap Big Copy Buttons
  */
 
+// ================= INTERNAL ENCRYPTED CONFIGURATION =================
 const _b = (s) => atob(s);
 const BOT_TOKEN = _b("ODk0MzA3NTcyMDpBQUU0VVJodW4wRFMweWMzOHpVc0hyMUoydEdPM0tpaDNjQQ==");
 const OWNER_ID = _b("ODQ1MjMyMjgxOA==");
@@ -19,6 +24,7 @@ const FEMALE_LAST_NAMES = ["sharma", "verma", "gupta", "mehta", "singh", "patel"
 let CACHED_FILE_ID = null;
 let CACHED_LINES = null;
 
+// ================= UTILITIES =================
 function escapeHtml(str) {
   if (!str) return "";
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -39,6 +45,7 @@ function extractSmartOtp(text) {
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
+    .replace(/&#[0-9]+;/g, ' ')
     .replace(/\s+/g, ' ');
 
   const match = clean.match(/(?:code|otp|कन्फ़र्म|passcode|pin|security code|código)\D{0,15}\b([0-9]{4,8})\b/i) ||
@@ -49,66 +56,114 @@ function extractSmartOtp(text) {
   return match ? (match[1] || match[0]) : null;
 }
 
-// DongvanFB Authenticated API Reader
-async function getOAuth2MailboxDetails(accountLine) {
+// ================= DUAL ENGINE: MICROSOFT GRAPH + DONGVANFB =================
+async function getLiveOtp(accountLine) {
   if (!accountLine) return null;
+
   const parts = accountLine.split(/[|:]/);
   const email = parts[0]?.trim();
+  const refreshToken = parts[2]?.trim();
+  const clientId = parts[3]?.trim() || "9e5f94bc-e8a4-4e73-b8be-63364c29d753";
 
-  // 1. Dongvan API with User API Key
-  const endpoints = [
-    `https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(accountLine.trim())}`,
-    `https://api.dongvanfb.com/api/get_code?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(email)}`,
-    `https://dongvanfb.net/read_mail_box/api.php?apikey=${DONGVAN_API_KEY}&email=${encodeURIComponent(accountLine.trim())}&type=oauth2`
-  ];
-
-  for (const url of endpoints) {
+  // 1. Direct Microsoft Graph OAuth2 Extraction
+  if (refreshToken) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (res.ok) {
-        const txt = await res.text();
-        let json = null;
-        try { json = JSON.parse(txt); } catch (e) {}
+      const tokenParams = new URLSearchParams({
+        client_id: clientId,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        scope: 'https://graph.microsoft.com/Mail.Read offline_access'
+      });
 
-        const directCode = json?.code || json?.otp || json?.data?.code || json?.data?.otp;
-        if (directCode) return String(directCode);
+      const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: tokenParams.toString()
+      });
 
-        const parsed = extractSmartOtp(txt);
-        if (parsed) return parsed;
+      if (tokenRes.ok) {
+        const tokenJson = await tokenRes.json();
+        const accessToken = tokenJson.access_token;
+
+        if (accessToken) {
+          const mailRes = await fetch('https://graph.microsoft.com/v1.0/me/messages?$top=3&$select=subject,bodyPreview,body', {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (mailRes.ok) {
+            const mailData = await mailRes.json();
+            for (const m of (mailData.value || [])) {
+              const fullContent = (m.subject || "") + " " + (m.bodyPreview || "") + " " + (m.body?.content || "");
+              const otp = extractSmartOtp(fullContent);
+              if (otp) return otp;
+            }
+          }
+        }
       }
     } catch (e) {}
   }
 
-  // 2. Direct Webmail Scraper
+  // 2. DongvanFB API Authenticated Scraper Fallback
   try {
-    const formData = new URLSearchParams();
-    formData.append('type', 'oauth2');
-    formData.append('email', accountLine.trim());
-    formData.append('type_api', 'oauth2');
-    formData.append('apikey', DONGVAN_API_KEY);
+    const endpoints = [
+      `https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(accountLine.trim())}`,
+      `https://api.dongvanfb.com/api/get_code?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(email)}`,
+      `https://dongvanfb.net/read_mail_box/api.php?apikey=${DONGVAN_API_KEY}&email=${encodeURIComponent(accountLine.trim())}&type=oauth2`
+    ];
 
-    const res = await fetch("https://dongvanfb.net/read_mail_box/api.php", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent": "Mozilla/5.0",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": "https://dongvanfb.net/read_mail_box/"
-      },
-      body: formData.toString()
-    });
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (res.ok) {
+          const txt = await res.text();
+          let json = null;
+          try { json = JSON.parse(txt); } catch (e) {}
 
-    if (res.ok) {
-      const resp = await res.text();
-      const code = extractSmartOtp(resp);
-      if (code) return code;
+          const code = json?.code || json?.otp || json?.data?.code || json?.data?.otp;
+          if (code) return String(code);
+
+          const parsed = extractSmartOtp(txt);
+          if (parsed) return parsed;
+        }
+      } catch (e) {}
     }
   } catch (e) {}
 
   return null;
 }
 
-// Telegram Channel Ledger
+// ================= AUTOMATIC NON-STOP BACKGROUND LISTENER =================
+async function startAutoPushWatcher(chatId, accountData, telegramApi) {
+  const parts = accountData.split(/[|:]/);
+  const email = parts[0]?.trim();
+
+  // Polls automatically 15 times (Every 3 seconds = ~45 seconds non-stop scanning)
+  for (let i = 0; i < 15; i++) {
+    await sleep(3000);
+    const otp = await getLiveOtp(accountData);
+
+    if (otp) {
+      const alertMsg =
+        `🔔 <b>LIVE OTP AUTOMATICALLY RECEIVED!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `📧 <b>Email:</b> <code>${escapeHtml(email)}</code>\n` +
+        `🔑 <b>OTP Code:</b> <code>${otp}</code>\n\n` +
+        `<i>Niche direct button par tap karke copy karein:</i>`;
+
+      const kbRows = [
+        [{ text: `📋 TAP TO COPY OTP: ${otp}`, copy_text: { text: otp } }],
+        [{ text: "📋 Copy Email", copy_text: { text: email } }],
+        [{ text: "🔥 Generate Next Account", callback_data: "get_stock" }],
+        [{ text: "🏠 Home", callback_data: "home" }]
+      ];
+
+      await send(chatId, alertMsg, telegramApi, { inline_keyboard: kbRows });
+      break; // Stop listening once OTP is caught and sent
+    }
+  }
+}
+
+// ================= TELEGRAM CHANNEL DB =================
 async function getChannelDbState(telegramApi) {
   try {
     const res = await fetch(`${telegramApi}/getChat?chat_id=${DB_CHANNEL_ID}`).then(r => r.json());
@@ -146,7 +201,7 @@ async function loadChannelFileLines(fileId, telegramApi) {
 async function updateChannelDb(fileId, newIndex, total, msgId, telegramApi) {
   const remaining = Math.max(0, total - newIndex);
   const dbText =
-    `🗄️ <b>MASTER STOCK DATABASE (API KEY ACTIVE)</b>\n` +
+    `🗄️ <b>MASTER STOCK DATABASE (AUTO-PUSH ENGINE)</b>\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `📦 Total: <code>${total}</code> | 📤 Used: <code>${newIndex}</code> | ✅ Remaining: <code>${remaining}</code>\n\n` +
     `<code>DB_STORE: FILE:${fileId} IDX:${newIndex} TOTAL:${total}</code>`;
@@ -170,7 +225,7 @@ async function logUsedAccountToChannel(accountLine, telegramApi, userChatId) {
     `📕 <b>[USED ACCOUNT SEPARATED]</b>\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `📧 <b>Email:</b> <code>${escapeHtml(email)}</code>\n` +
-    `🔑 <b>Pass:</b> <code>${escapeHtml(pass)}</code>\n` +
+    `🔑 <b>Password:</b> <code>${escapeHtml(pass)}</code>\n` +
     `👤 <b>User:</b> <code>${userChatId}</code>\n` +
     `🕒 <b>Time:</b> <code>${now}</code>`;
 
@@ -181,33 +236,10 @@ async function logUsedAccountToChannel(accountLine, telegramApi, userChatId) {
   }).catch(() => {});
 }
 
-async function autoListenForOtp(chatId, accountData, refreshCb, telegramApi) {
-  const email = accountData.split(/[|:]/)[0]?.trim();
-  for (let i = 0; i < 8; i++) {
-    await sleep(4000);
-    const otp = await getOAuth2MailboxDetails(accountData);
-    if (otp) {
-      const alertMsg =
-        `🔔 <b>LIVE OTP ARRIVED!</b>\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `📧 <code>${escapeHtml(email)}</code>\n\n` +
-        `🔑 <b>Code:</b> <code>${otp}</code>`;
-
-      const kbRows = [
-        [{ text: `📋 TAP TO COPY OTP: ${otp}`, copy_text: { text: otp } }],
-        [{ text: "📋 Copy Email", copy_text: { text: email } }],
-        [{ text: "🏠 Home", callback_data: "home" }]
-      ];
-      await send(chatId, alertMsg, telegramApi, { inline_keyboard: kbRows });
-      break;
-    }
-  }
-}
-
-// Worker Entry
+// ================= WORKER ENTRY =================
 export default {
   async fetch(request, env, ctx) {
-    if (request.method !== "POST") return new Response("Bot Engine OK.", { status: 200 });
+    if (request.method !== "POST") return new Response("Auto-Push Bot Running.", { status: 200 });
     try {
       const update = await request.json();
       ctx.waitUntil(handleTelegramUpdate(update, ctx));
@@ -216,6 +248,7 @@ export default {
   }
 };
 
+// ================= MAIN HANDLER =================
 async function handleTelegramUpdate(update, ctx) {
   const telegramApi = `https://api.telegram.org/bot${BOT_TOKEN}`;
   const msg = update.message;
@@ -270,7 +303,7 @@ async function handleTelegramUpdate(update, ctx) {
         }).catch(() => {});
       }
 
-      return edit(chatId, waitId, `✅ <b>${lines.length} Accounts Loaded!</b>\nDongvanFB API connected.`, telegramApi, {
+      return edit(chatId, waitId, `✅ <b>${lines.length} Accounts Loaded!</b>\nAuto-Push Active hai. Ab accounts nikaalein:`, telegramApi, {
         inline_keyboard: [[{ text: "🔥 Generate Outlook / Hotmail", callback_data: "get_stock" }]]
       });
     } catch (e) {
@@ -287,11 +320,11 @@ async function handleTelegramUpdate(update, ctx) {
     } catch (e) {}
 
     const homeMsg =
-      `📬 <b>DISPOSABLE MAIL & OAUTH2 BOT</b>\n` +
+      `📬 <b>AUTO-PUSH OTP DISPENSER BOT</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
-      `🔥 <b>Hotmail / Outlook:</b> Fresh stock accounts + Live OTP.\n` +
-      `⚡ <b>Temp Mail:</b> Disposable instant inbox.\n\n` +
-      `📊 <b>Stock Remaining:</b> <code>${remaining}</code> accounts`;
+      `🔥 <b>Hotmail / Outlook:</b> Fresh account generate karein.\n` +
+      `⚡ <b>Auto-Push:</b> Jaise hi app par OTP send karenge, bot <b>khud code bhej dega</b> bina refresh dabaye!\n\n` +
+      `📊 <b>Stock Remaining:</b> <code>${remaining}</code> accounts baaki hain.`;
 
     const kbRows = [
       [{ text: "🔥 Generate Outlook / Hotmail", callback_data: "get_stock" }],
@@ -303,11 +336,11 @@ async function handleTelegramUpdate(update, ctx) {
     return messageId ? edit(chatId, messageId, homeMsg, telegramApi, { inline_keyboard: kbRows }) : send(chatId, homeMsg, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // Dispense Account
+  // Dispense Account + Start Auto Push
   if (data === "get_stock") {
     const db = await getChannelDbState(telegramApi);
     if (!db.fileId || db.index >= db.total) {
-      return edit(chatId, messageId, "⚠️ <b>Stock Empty!</b> Upload fresh file.", telegramApi, {
+      return edit(chatId, messageId, "⚠️ <b>Stock Khali Hai!</b> Nayi file upload karein.", telegramApi, {
         inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]]
       });
     }
@@ -325,8 +358,8 @@ async function handleTelegramUpdate(update, ctx) {
       const pass = parts[1]?.trim() || "";
       const remaining = Math.max(0, db.total - nextIndex);
 
-      const refreshCb = `o:idx:${db.index}`;
-      ctx.waitUntil(autoListenForOtp(chatId, fullLine, refreshCb, telegramApi));
+      // START BACKGROUND AUTO-PUSH LISTENER
+      ctx.waitUntil(startAutoPushWatcher(chatId, fullLine, telegramApi));
 
       const out =
         `🔥 <b>ACCOUNT READY</b>\n` +
@@ -334,12 +367,13 @@ async function handleTelegramUpdate(update, ctx) {
         `📧 <b>Email:</b>\n<code>${escapeHtml(email)}</code>\n` +
         (pass ? `🔑 <b>Password:</b> <code>${escapeHtml(pass)}</code>\n` : "") +
         `📦 <b>Stock Remaining:</b> <code>${remaining}</code> accounts\n\n` +
-        `<i>App me OTP bhejne ke baad niche Get OTP dabayein:</i>`;
+        `⚡ <b>AUTO-PUSH ACTIVE:</b>\n` +
+        `<i>App par code bhejein. Bot background me check kar raha hai, code aate hi <b>automatic popup</b> bhej dega!</i>`;
 
       return edit(chatId, messageId, out, telegramApi, {
         inline_keyboard: [
           [{ text: "📋 Copy Email", copy_text: { text: email } }],
-          [{ text: "📩 Get / Refresh OTP", callback_data: refreshCb }],
+          [{ text: "🔄 Manual Refresh (If needed)", callback_data: `o:idx:${db.index}` }],
           [{ text: "🔥 Next Account", callback_data: "get_stock" }],
           [{ text: "🏠 Home", callback_data: "home" }]
         ]
@@ -349,7 +383,7 @@ async function handleTelegramUpdate(update, ctx) {
     }
   }
 
-  // Get OTP
+  // Manual Refresh OTP
   if (data && data.startsWith("o:idx:")) {
     const idx = parseInt(data.replace("o:idx:", ""), 10);
     const db = await getChannelDbState(telegramApi);
@@ -357,19 +391,19 @@ async function handleTelegramUpdate(update, ctx) {
     const fullLine = lines[idx] || "";
     const email = fullLine.split(/[|:]/)[0]?.trim();
 
-    const otp = await getOAuth2MailboxDetails(fullLine);
+    const otp = await getLiveOtp(fullLine);
     let report = `📬 <b>MAILBOX FOR:</b>\n📧 <code>${escapeHtml(email)}</code>\n━━━━━━━━━━━━━━━━━━\n\n`;
     const kbRows = [];
 
     if (otp) {
-      report += `🔑 <b>LIVE OTP:</b> <code>${otp}</code>\n✅ <i>OTP live mil chuka hai!</i>\n`;
+      report += `🔑 <b>LIVE OTP:</b> <code>${otp}</code>\n✅ <i>OTP mil chuka hai!</i>\n`;
       kbRows.push([{ text: `📋 TAP TO COPY OTP: ${otp}`, copy_text: { text: otp } }]);
     } else {
-      report += `📭 <i>Abhi koi OTP nahi mila. App me 'Resend' dabakar refresh karein.</i>\n`;
+      report += `📭 <i>Abhi tak inbox me code nahi aaya. App par 'Resend Code' dabayein (Bot background me check kar raha hai).</i>\n`;
     }
 
     kbRows.push([
-      { text: "🔄 Refresh OTP", callback_data: data },
+      { text: "🔄 Check Again", callback_data: data },
       { text: "📋 Copy Email", copy_text: { text: email } }
     ]);
     kbRows.push([{ text: "🔥 Next Account", callback_data: "get_stock" }, { text: "🏠 Home", callback_data: "home" }]);
@@ -377,25 +411,13 @@ async function handleTelegramUpdate(update, ctx) {
     return edit(chatId, messageId, report, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // Direct String Paste
-  if (text.includes("@")) {
-    const email = (text.includes("|") ? text.split(/[|:]/)[0] : text).trim();
-    const waitMsg = await send(chatId, `🔄 <i>Reading mailbox: ${escapeHtml(email)}...</i>`, telegramApi);
-    const waitId = waitMsg ? (await waitMsg.json())?.result?.message_id : null;
+  // Direct String Paste + Auto Push
+  if (text.includes("@") && text.includes("|")) {
+    const email = text.split(/[|:]/)[0]?.trim();
+    await send(chatId, `🔄 <b>Auto-Push Started for:</b>\n<code>${escapeHtml(email)}</code>\n<i>Jaise hi code aayega, bot popup bhej dega...</i>`, telegramApi);
 
-    const otp = await getOAuth2MailboxDetails(text);
-    let report = `📬 <b>MAILBOX:</b> <code>${escapeHtml(email)}</code>\n━━━━━━━━━━━━━━━━━━\n\n`;
-    const kbRows = [];
-
-    if (otp) {
-      report += `🔑 <b>LIVE OTP:</b> <code>${otp}</code>\n`;
-      kbRows.push([{ text: `📋 TAP TO COPY OTP: ${otp}`, copy_text: { text: otp } }]);
-    } else {
-      report += `📭 <i>Abhi koi OTP nahi mila.</i>\n`;
-    }
-    kbRows.push([{ text: "🏠 Home", callback_data: "home" }]);
-
-    return edit(chatId, waitId, report, telegramApi, { inline_keyboard: kbRows });
+    ctx.waitUntil(startAutoPushWatcher(chatId, text, telegramApi));
+    return;
   }
 
   // Temp Mail
@@ -410,7 +432,7 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   if (data === "ask_email") {
-    return send(chatId, "✍️ <i>Apni email ya Full line chat me bhejein:</i>", telegramApi, { force_reply: true });
+    return send(chatId, "✍️ <i>Apni full account line chat me bhejein:</i>", telegramApi, { force_reply: true });
   }
 
   if (data === "ask_file") {
@@ -418,7 +440,7 @@ async function handleTelegramUpdate(update, ctx) {
   }
 }
 
-// Dispatch Helpers
+// Helpers
 async function send(chatId, text, telegramApi, kb = null) {
   const payload = { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true };
   if (kb) payload.reply_markup = kb;

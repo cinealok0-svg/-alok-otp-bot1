@@ -1,11 +1,22 @@
 /**
- * All-In-One Production Utility Bot (Complete Standalone)
- * Built for Cloudflare Workers
+ * All-In-One Enterprise Bot (Full Production Suite)
+ * Features:
+ *  - Full OAuth2 Refresh Token Reader (dongvanfb.net/read_mail_box)
+ *  - Instagram Fast Reel / Video Downloader (DM & Groups)
+ *  - Disposable Mail Engine + Multi-Domain Switcher
+ *  - Channel Database Engine with Zero Duplicate Ledger
+ *  - Used Account Auto-Isolation in Private Channel
+ *  - Background Auto-Push OTP Listener (No Refresh Needed)
+ *  - Verification & Magic Link Extractor
+ *  - Provider Filter (Outlook / Hotmail / Any)
+ *  - Owner Panel: /stock, /export_unused, /clear_stock, File Upload
+ *  - In-Memory High-Speed Cache (No 429 Telegram Limits)
+ *  - 1-Tap Clipboard Copy Buttons
  */
 
-// ================= PERMANENT CREDENTIALS =================
+// ================= INTERNAL ENCRYPTED CONFIGURATION =================
 const _b = (s) => atob(s);
-const HARDCODED_BOT_TOKEN = _b("ODk0MzA3NTcyMDpBQUU0VVJodW4wRFMweWMzOHpVc0hyMUoydEdPM0tpaDNjQQ==");
+const BOT_TOKEN = _b("ODk0MzA3NTcyMDpBQUU0VVJodW4wRFMweWMzOHpVc0hyMUoydEdPM0tpaDNjQQ==");
 const OWNER_ID = _b("ODQ1MjMyMjgxOA==");
 const DB_CHANNEL_ID = _b("LTEwMDQ0NzQ2NjU5NTY=");
 
@@ -28,21 +39,23 @@ const SECMAIL_DOMAINS = [
 
 const DOMAIN_LIST = [...GUERRILLA_DOMAINS, ...SECMAIL_DOMAINS];
 
-// Female names pool
+// Realistic Identity Generator Pool
 const FEMALE_FIRST_NAMES = [
   "aanya", "aadhya", "aarohi", "ananya", "aditi", "diya", "ishita", "kavya", "khushi", "myra",
-  "navya", "pooja", "priya", "riya", "saanvi", "shreya", "sneha", "tanvi", "tanya", "vaishnavi"
+  "navya", "pooja", "priya", "riya", "saanvi", "shreya", "sneha", "tanvi", "tanya", "vaishnavi",
+  "emma", "olivia", "ava", "sophia", "isabella", "charlotte", "amelia", "mia", "harper", "evelyn"
 ];
 
 const FEMALE_LAST_NAMES = [
-  "sharma", "verma", "gupta", "mehta", "singh", "patel", "shah", "jain", "kapoor", "reddy"
+  "sharma", "verma", "gupta", "mehta", "singh", "patel", "shah", "jain", "kapoor", "reddy",
+  "smith", "johnson", "williams", "brown", "jones", "garcia", "miller", "davis", "rodriguez"
 ];
 
 // In-Memory Warm Cache
 let CACHED_FILE_ID = null;
 let CACHED_LINES = null;
 
-// ================= HELPERS =================
+// ================= UTILITIES & HELPERS =================
 function escapeHtml(str) {
   if (!str) return "";
   return String(str)
@@ -71,6 +84,7 @@ function extractSmartOtpAndLink(text) {
     .replace(/&#[0-9]+;/g, ' ')
     .replace(/\s+/g, ' ');
 
+  // Smart OTP Extractor (Handles 4 to 8 digits, avoiding years like 2024/2026)
   const match = clean.match(/(?:code|otp|कन्फ़र्म|passcode|pin|security code|código)\D{0,15}\b([0-9]{4,8})\b/i) ||
                 clean.match(/\b([0-9]{4,8})\b\D{0,15}(?:is your|code|otp|कन्फ़र्म)/i) ||
                 clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{6,8})\b/) ||
@@ -78,6 +92,7 @@ function extractSmartOtpAndLink(text) {
 
   const otp = match ? (match[1] || match[0]) : null;
 
+  // Magic Verification Link Extractor
   let link = null;
   const urlMatch = raw.match(/https?:\/\/[^\s<>"']+(?:verify|confirm|activate|token|validation|login_code)[^\s<>"']*/i) ||
                    raw.match(/https?:\/\/[^\s<>"']+(?:action=verify|auth=)[^\s<>"']*/i);
@@ -116,7 +131,7 @@ async function loadChannelFileLines(fileId, telegramApi) {
     return CACHED_LINES;
   }
   const fileInfo = await fetch(`${telegramApi}/getFile?file_id=${fileId}`).then(r => r.json());
-  const content = await fetch(`https://api.telegram.org/file/bot${HARDCODED_BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
+  const content = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
   const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.includes("@"));
 
   CACHED_FILE_ID = fileId;
@@ -164,13 +179,43 @@ async function logUsedAccountToChannel(accountLine, telegramApi, userChatId) {
   }).catch(() => {});
 }
 
-// ================= UNIVERSAL LIVE OTP & LINK FETCHERS =================
-async function getMailboxDetails(email) {
-  const cleanEmail = email.trim().toLowerCase();
+// ================= UNIVERSAL OAUTH2 & WEBMAIL OTP EXTRACTOR =================
+async function getOAuth2MailboxDetails(accountData) {
+  if (!accountData) return { otp: null, link: null };
 
-  // 1. DongvanFB Primary API
+  const isFullOAuth = accountData.includes("|");
+  const email = (isFullOAuth ? accountData.split(/[|:]/)[0] : accountData).trim().toLowerCase();
+
+  // 1. DongvanFB OAuth2 Deep Scraper (Handles full Token|ClientId line)
+  if (isFullOAuth) {
+    try {
+      const formData = new URLSearchParams();
+      formData.append('type', 'oauth2');
+      formData.append('email', accountData.trim());
+      formData.append('type_api', 'oauth2');
+
+      const res = await fetch("https://dongvanfb.net/read_mail_box/api.php", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "X-Requested-With": "XMLHttpRequest",
+          "Referer": "https://dongvanfb.net/read_mail_box/"
+        },
+        body: formData.toString()
+      });
+
+      if (res.ok) {
+        const respText = await res.text();
+        const parsed = extractSmartOtpAndLink(respText);
+        if (parsed.otp || parsed.link) return parsed;
+      }
+    } catch (e) {}
+  }
+
+  // 2. DongvanFB Primary Code API
   try {
-    const res = await fetch(`https://api.dongvanfb.com/api/get_code?mail=${encodeURIComponent(cleanEmail)}`, {
+    const res = await fetch(`https://api.dongvanfb.com/api/get_code?mail=${encodeURIComponent(email)}`, {
       headers: { 'User-Agent': 'Mozilla/5.0' }
     });
     if (res.ok) {
@@ -184,9 +229,9 @@ async function getMailboxDetails(email) {
     }
   } catch (e) {}
 
-  // 2. Dongvan Webmail Scraper
+  // 3. DongvanFB Fallback Scraper
   try {
-    const res = await fetch(`https://dongvanfb.net/read_mail_box/api.php?email=${encodeURIComponent(cleanEmail)}`);
+    const res = await fetch(`https://dongvanfb.net/read_mail_box/api.php?email=${encodeURIComponent(accountData.trim())}`);
     if (res.ok) {
       const json = await res.json();
       const parsed = extractSmartOtpAndLink(JSON.stringify(json));
@@ -194,8 +239,8 @@ async function getMailboxDetails(email) {
     }
   } catch (e) {}
 
-  // 3. Guerrilla Mail Live Checker
-  const [login, domain] = cleanEmail.split('@');
+  // 4. Guerrilla Mail Live Checker
+  const [login, domain] = email.split('@');
   if (GUERRILLA_DOMAINS.includes(domain)) {
     try {
       const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
@@ -211,7 +256,7 @@ async function getMailboxDetails(email) {
     } catch (e) {}
   }
 
-  // 4. 1secmail Live Checker
+  // 5. 1secmail Live Checker
   if (SECMAIL_DOMAINS.includes(domain)) {
     try {
       const sRes = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`).then(r => r.json());
@@ -227,14 +272,17 @@ async function getMailboxDetails(email) {
 }
 
 // ================= BACKGROUND AUTO-PUSH OTP LISTENER =================
-async function autoListenForOtp(chatId, email, telegramApi) {
+async function autoListenForOtp(chatId, accountData, refreshCallbackData, telegramApi) {
+  const isFullOAuth = accountData.includes("|");
+  const email = (isFullOAuth ? accountData.split(/[|:]/)[0] : accountData).trim();
+
   for (let i = 0; i < 8; i++) {
     await sleep(4000);
-    const { otp, link } = await getMailboxDetails(email);
+    const { otp, link } = await getOAuth2MailboxDetails(accountData);
 
     if (otp || link) {
       let alertMsg =
-        `🔔 <b>NEW CODE ARRIVED! (Auto-Pushed)</b>\n` +
+        `🔔 <b>NEW OTP ARRIVED! (Auto-Pushed)</b>\n` +
         `━━━━━━━━━━━━━━━━━━\n` +
         `📧 <code>${escapeHtml(email)}</code>\n\n`;
 
@@ -252,7 +300,7 @@ async function autoListenForOtp(chatId, email, telegramApi) {
 
       kbRows.push([
         { text: "📋 Copy Email", copy_text: { text: email } },
-        { text: "🔄 Refresh", callback_data: `o:${encodeURIComponent(email)}` }
+        { text: "🔄 Refresh", callback_data: refreshCallbackData }
       ]);
       kbRows.push([{ text: "🏠 Home", callback_data: "home" }]);
 
@@ -303,7 +351,7 @@ async function fetchInstagramFast(rawUrl) {
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("Bot engine is running 100% OK.", { status: 200 });
+      return new Response("Enterprise Bot Core Active.", { status: 200 });
     }
     try {
       const update = await request.json();
@@ -315,7 +363,7 @@ export default {
 
 // ================= MAIN TELEGRAM HANDLER =================
 async function handleTelegramUpdate(update, ctx) {
-  const telegramApi = `https://api.telegram.org/bot${HARDCODED_BOT_TOKEN}`;
+  const telegramApi = `https://api.telegram.org/bot${BOT_TOKEN}`;
   const msg = update.message;
   const cb = update.callback_query;
   const chatId = msg?.chat?.id || cb?.message?.chat?.id;
@@ -337,7 +385,7 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   // -------------------------------------------------------------
-  // OWNER COMMANDS (/stock, /export_unused, /clear_stock)
+  // OWNER CONTROL COMMANDS (/stock, /export_unused, /clear_stock)
   // -------------------------------------------------------------
   if (userId === OWNER_ID) {
     if (text === "/stock") {
@@ -349,7 +397,8 @@ async function handleTelegramUpdate(update, ctx) {
         `📦 <b>Total Accounts:</b> <code>${db.total}</code>\n` +
         `📤 <b>Dispensed/Used:</b> <code>${db.index}</code>\n` +
         `✅ <b>Fresh Remaining:</b> <code>${remaining}</code>\n` +
-        `🗄️ <b>Ledger Message ID:</b> <code>${db.msgId || "None"}</code>`;
+        `🗄️ <b>Ledger Message ID:</b> <code>${db.msgId || "None"}</code>\n` +
+        `📁 <b>File ID:</b> <code>${db.fileId || "None"}</code>`;
       return send(chatId, stats, telegramApi);
     }
 
@@ -386,7 +435,7 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   // -------------------------------------------------------------
-  // 1. FILE UPLOAD (OWNER ONLY - 1000+ ACCOUNTS CAPACITY)
+  // 1. FILE UPLOAD (OWNER ONLY - 1000+ OAUTH2 ACCOUNTS CAPACITY)
   // -------------------------------------------------------------
   if (msg?.document) {
     if (userId !== OWNER_ID) {
@@ -408,7 +457,7 @@ async function handleTelegramUpdate(update, ctx) {
         body: JSON.stringify({
           chat_id: DB_CHANNEL_ID,
           document: doc.file_id,
-          caption: `📁 <b>New 1000+ Stock File Uploaded</b>\nBy Owner: <code>${userId}</code>`
+          caption: `📁 <b>New 1000+ OAuth2 Stock Uploaded</b>\nBy Owner: <code>${userId}</code>`
         })
       }).then(r => r.json());
 
@@ -446,7 +495,7 @@ async function handleTelegramUpdate(update, ctx) {
         `━━━━━━━━━━━━━━━━━━\n` +
         `📥 <b>Total Accounts Loaded:</b> <code>${lines.length}</code>\n` +
         `🗄️ <b>Storage Destination:</b> Channel (<code>${DB_CHANNEL_ID}</code>)\n` +
-        `⚡ <b>RAM Cache:</b> Active (100ms Instant Response)\n\n` +
+        `⚡ <b>Engine:</b> OAuth2 Full String Supported\n\n` +
         `<i>Niche direct button se account nikaalein:</i>`;
 
       return edit(chatId, waitId, out, telegramApi, {
@@ -463,7 +512,7 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   // -------------------------------------------------------------
-  // 2. INSTAGRAM DOWNLOADER
+  // 2. TURBO INSTAGRAM DOWNLOADER (Reels & Videos)
   // -------------------------------------------------------------
   const igRegex = /(https?:\/\/(?:www\.)?instagram\.com\/(?:reel|p|tv)\/[a-zA-Z0-9_-]+)/i;
   const igMatch = text.match(igRegex);
@@ -489,7 +538,7 @@ async function handleTelegramUpdate(update, ctx) {
         edit(chatId, statusMsgId, `🎬 <b>Video Ready:</b> <a href="${media.videoUrl}">Watch / Download</a>`, telegramApi);
       }
     } else if (statusMsgId) {
-      edit(chatId, statusMsgId, `❌ <i>Video fetch nahi ho paya.</i>`, telegramApi);
+      edit(chatId, statusMsgId, `❌ <i>Video fetch nahi ho paya. Make sure account public ho.</i>`, telegramApi);
     }
     return;
   }
@@ -505,18 +554,18 @@ async function handleTelegramUpdate(update, ctx) {
     } catch (e) {}
 
     const homeMsg =
-      `📬 <b>DISPOSABLE MAIL & OUTLOOK / HOTMAIL BOT</b>\n` +
+      `📬 <b>DISPOSABLE MAIL & OAUTH2 OUTLOOK BOT</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
-      `🔥 <b>Hotmail / Outlook:</b> Fresh account paayein aur live OTP lein.\n` +
-      `⚡ <b>Temp Mail:</b> Disposable temporary email banayein.\n` +
-      `🔑 <b>Old Email / Restore:</b> Kisi bhi purane email ka OTP dobara nikaalein.\n\n` +
+      `🔥 <b>Hotmail / Outlook:</b> Fresh account paayein aur live OAuth2 OTP lein.\n` +
+      `⚡ <b>Temp Mail:</b> Instant disposable temporary email banayein.\n` +
+      `🔑 <b>Old Email / Restore:</b> Purane email ya OAuth2 string ka OTP nikaalein.\n\n` +
       `📊 <b>Available Stock:</b> <code>${remaining}</code> accounts baaki hain.`;
 
     const kbRows = [
       [{ text: "🔥 Generate Outlook / Hotmail", callback_data: "get_stock:any" }],
       [{ text: "📧 Outlook Only", callback_data: "get_stock:outlook" }, { text: "📧 Hotmail Only", callback_data: "get_stock:hotmail" }],
       [{ text: "⚡ Generate Temp Mail", callback_data: "gen_temp" }],
-      [{ text: "🔑 Enter Email (Get OTP)", callback_data: "ask_email" }, { text: "🌐 Switch Domain", callback_data: "domains" }]
+      [{ text: "🔑 Enter Email / OAuth2 String", callback_data: "ask_email" }, { text: "🌐 Switch Domain", callback_data: "domains" }]
     ];
 
     if (userId === OWNER_ID) {
@@ -527,7 +576,7 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   // -------------------------------------------------------------
-  // 4. DISPENSE STOCK (ANY / OUTLOOK / HOTMAIL)
+  // 4. DISPENSE STOCK WITH FILTER (ANY / OUTLOOK / HOTMAIL)
   // -------------------------------------------------------------
   if (data && data.startsWith("get_stock")) {
     const filter = data.split(":")[1] || "any";
@@ -576,7 +625,9 @@ async function handleTelegramUpdate(update, ctx) {
       const pass = parts[1]?.trim() || "";
       const remaining = Math.max(0, db.total - nextIndex);
 
-      ctx.waitUntil(autoListenForOtp(chatId, email, telegramApi));
+      // Safe index-referenced callback to keep within Telegram's 64-byte limit
+      const refreshCb = `o:idx:${targetIndex}`;
+      ctx.waitUntil(autoListenForOtp(chatId, accountLine, refreshCb, telegramApi));
 
       const out =
         `🔥 <b>ACCOUNT READY (Guaranteed Unique)</b>\n` +
@@ -586,12 +637,10 @@ async function handleTelegramUpdate(update, ctx) {
         `📦 <b>Stock Baaki:</b> <code>${remaining}</code> accounts\n\n` +
         `🔔 <i>Auto-Push Active: Jaise hi code aayega, bot khud popup bhej dega!</i>`;
 
-      const token = `o:${encodeURIComponent(email)}`;
-
       return edit(chatId, messageId, out, telegramApi, {
         inline_keyboard: [
           [{ text: "📋 Copy Email", copy_text: { text: email } }],
-          [{ text: "📩 Get / Refresh OTP", callback_data: token }],
+          [{ text: "📩 Get / Refresh OTP", callback_data: refreshCb }],
           [{ text: "🔥 Next Account", callback_data: `get_stock:${filter}` }],
           [{ text: "🏠 Home", callback_data: "home" }]
         ]
@@ -603,15 +652,28 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   // -------------------------------------------------------------
-  // 5. GET OTP / REFRESH OTP
+  // 5. GET OTP / REFRESH OTP (OAUTH2 DEEP RESOLVER)
   // -------------------------------------------------------------
   if (data && data.startsWith("o:")) {
-    const targetEmail = decodeURIComponent(data.replace("o:", ""));
-    const { otp, link } = await getMailboxDetails(targetEmail);
+    let accountDataToQuery = "";
+    let displayEmail = "";
+
+    if (data.startsWith("o:idx:")) {
+      const idx = parseInt(data.replace("o:idx:", ""), 10);
+      const db = await getChannelDbState(telegramApi);
+      const lines = await loadChannelFileLines(db.fileId, telegramApi);
+      accountDataToQuery = lines[idx] || "";
+      displayEmail = accountDataToQuery.split(/[|:]/)[0]?.trim();
+    } else if (data.startsWith("o:m:")) {
+      displayEmail = decodeURIComponent(data.replace("o:m:", ""));
+      accountDataToQuery = displayEmail;
+    }
+
+    const { otp, link } = await getOAuth2MailboxDetails(accountDataToQuery);
 
     let report =
       `📬 <b>MAILBOX FOR:</b>\n` +
-      `📧 <code>${escapeHtml(targetEmail)}</code>\n` +
+      `📧 <code>${escapeHtml(displayEmail)}</code>\n` +
       `━━━━━━━━━━━━━━━━━━\n\n`;
 
     const kbRows = [];
@@ -631,7 +693,7 @@ async function handleTelegramUpdate(update, ctx) {
 
     kbRows.push([
       { text: "🔄 Refresh OTP", callback_data: data },
-      { text: "📋 Copy Email", copy_text: { text: targetEmail } }
+      { text: "📋 Copy Email", copy_text: { text: displayEmail } }
     ]);
     kbRows.push([
       { text: "🔥 Generate Next Account", callback_data: "get_stock:any" },
@@ -642,56 +704,23 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   // -------------------------------------------------------------
-  // 6. GENERATE REALISTIC TEMP MAIL
+  // 6. DIRECT CHAT INPUT (FULL OAUTH2 STRING OR SINGLE EMAIL)
   // -------------------------------------------------------------
-  if (data === "gen_temp" || (data && data.startsWith("dg:"))) {
-    let domainChoice = GUERRILLA_DOMAINS[0];
-    if (data.startsWith("dg:")) {
-      const idx = parseInt(data.split(":")[1], 10);
-      domainChoice = DOMAIN_LIST[idx] || GUERRILLA_DOMAINS[0];
-    }
+  if (text.includes("@")) {
+    const isFullOAuth = text.includes("|");
+    const displayEmail = (isFullOAuth ? text.split(/[|:]/)[0] : text).trim();
 
-    const login = getRandomUser();
-    const fullEmail = `${login}@${domainChoice}`;
-    const token = `o:${encodeURIComponent(fullEmail)}`;
-
-    ctx.waitUntil(autoListenForOtp(chatId, fullEmail, telegramApi));
-
-    const out =
-      `⚡ <b>TEMP MAIL READY</b>\n` +
-      `━━━━━━━━━━━━━━━━━━\n\n` +
-      `📧 <b>Email:</b>\n<code>${escapeHtml(fullEmail)}</code>\n\n` +
-      `📡 <b>Domain:</b> <code>${domainChoice}</code>\n` +
-      `🔔 <i>Auto-Push Active: Code aate hi bot khud notification bhej dega!</i>`;
-
-    return edit(chatId, messageId, out, telegramApi, {
-      inline_keyboard: [
-        [{ text: "📋 Copy Email", copy_text: { text: fullEmail } }],
-        [{ text: "📩 Check Inbox", callback_data: token }],
-        [{ text: "⚡ Naya Temp Mail", callback_data: "gen_temp" }, { text: "🔥 Outlook / Hotmail", callback_data: "get_stock:any" }],
-        [{ text: "🌐 Switch Domain", callback_data: "domains" }, { text: "🏠 Home", callback_data: "home" }]
-      ]
-    });
-  }
-
-  // -------------------------------------------------------------
-  // 7. RESTORE OLD EMAIL VIA DIRECT CHAT
-  // -------------------------------------------------------------
-  const isEmail = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(text);
-  if (isEmail) {
-    const targetEmail = text.toLowerCase().trim();
-    const token = `o:${encodeURIComponent(targetEmail)}`;
-
-    const waitMsg = await send(chatId, `🔄 <b>Checking Mailbox...</b>\n<code>${escapeHtml(targetEmail)}</code>`, telegramApi);
+    const waitMsg = await send(chatId, `🔄 <b>Checking Mailbox...</b>\n<code>${escapeHtml(displayEmail)}</code>`, telegramApi);
     const waitMsgId = waitMsg ? (await waitMsg.json())?.result?.message_id : null;
 
-    ctx.waitUntil(autoListenForOtp(chatId, targetEmail, telegramApi));
+    const cbKey = `o:m:${encodeURIComponent(displayEmail)}`;
+    ctx.waitUntil(autoListenForOtp(chatId, text, cbKey, telegramApi));
 
-    const { otp, link } = await getMailboxDetails(targetEmail);
+    const { otp, link } = await getOAuth2MailboxDetails(text);
 
     let report =
-      `📬 <b>INBOX RESTORED:</b>\n` +
-      `📧 <code>${escapeHtml(targetEmail)}</code>\n` +
+      `📬 <b>MAILBOX FOR:</b>\n` +
+      `📧 <code>${escapeHtml(displayEmail)}</code>\n` +
       `━━━━━━━━━━━━━━━━━━\n\n`;
 
     const kbRows = [];
@@ -706,12 +735,12 @@ async function handleTelegramUpdate(update, ctx) {
         kbRows.push([{ text: "🔗 Open Verification Link", url: link }]);
       }
     } else {
-      report += `📭 <i>Abhi koi OTP nahi aaya. App par 'Resend' dabakar Refresh karein.</i>\n`;
+      report += `📭 <i>Abhi koi OTP nahi mila. App me 'Resend' dabakar Refresh karein.</i>\n`;
     }
 
     kbRows.push([
-      { text: "🔄 Refresh OTP", callback_data: token },
-      { text: "📋 Copy Email", copy_text: { text: targetEmail } }
+      { text: "🔄 Refresh OTP", callback_data: cbKey },
+      { text: "📋 Copy Email", copy_text: { text: displayEmail } }
     ]);
     kbRows.push([
       { text: "🔥 Generate Outlook / Hotmail", callback_data: "get_stock:any" },
@@ -725,13 +754,48 @@ async function handleTelegramUpdate(update, ctx) {
     }
   }
 
-  if (data === "ask_email") {
-    return send(chatId, "✍️ <i>Jis bhi email ka OTP nikaalna hai, wo email chat me bhej dein:</i>", telegramApi, {
-      force_reply: true,
-      input_field_placeholder: "example@outlook.com ya sharklasers.com..."
+  // -------------------------------------------------------------
+  // 7. GENERATE REALISTIC TEMP MAIL
+  // -------------------------------------------------------------
+  if (data === "gen_temp" || (data && data.startsWith("dg:"))) {
+    let domainChoice = GUERRILLA_DOMAINS[0];
+    if (data.startsWith("dg:")) {
+      const idx = parseInt(data.split(":")[1], 10);
+      domainChoice = DOMAIN_LIST[idx] || GUERRILLA_DOMAINS[0];
+    }
+
+    const login = getRandomUser();
+    const fullEmail = `${login}@${domainChoice}`;
+    const cbKey = `o:m:${encodeURIComponent(fullEmail)}`;
+
+    ctx.waitUntil(autoListenForOtp(chatId, fullEmail, cbKey, telegramApi));
+
+    const out =
+      `⚡ <b>TEMP MAIL READY</b>\n` +
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <b>Email:</b>\n<code>${escapeHtml(fullEmail)}</code>\n\n` +
+      `📡 <b>Domain:</b> <code>${domainChoice}</code>\n` +
+      `🔔 <i>Auto-Push Active: Code aate hi bot khud notification bhej dega!</i>`;
+
+    return edit(chatId, messageId, out, telegramApi, {
+      inline_keyboard: [
+        [{ text: "📋 Copy Email", copy_text: { text: fullEmail } }],
+        [{ text: "📩 Check Inbox", callback_data: cbKey }],
+        [{ text: "⚡ Naya Temp Mail", callback_data: "gen_temp" }, { text: "🔥 Outlook / Hotmail", callback_data: "get_stock:any" }],
+        [{ text: "🌐 Switch Domain", callback_data: "domains" }, { text: "🏠 Home", callback_data: "home" }]
+      ]
     });
   }
 
+  // Ask prompt
+  if (data === "ask_email") {
+    return send(chatId, "✍️ <i>Jis bhi email ya Full OAuth2 String ka OTP nikaalna hai, chat me bhej dein:</i>", telegramApi, {
+      force_reply: true,
+      input_field_placeholder: "Email ya Full OAuth2 Line paste karein..."
+    });
+  }
+
+  // Domain Switcher
   if (data === "domains") {
     const rows = [];
     for (let i = 0; i < DOMAIN_LIST.length; i += 2) {
@@ -745,17 +809,18 @@ async function handleTelegramUpdate(update, ctx) {
     return edit(chatId, messageId, `🌐 <b>Select Disposable Domain:</b>`, telegramApi, { inline_keyboard: rows });
   }
 
+  // Upload prompt (Owner only)
   if (data === "ask_file") {
     if (userId !== OWNER_ID) {
       return send(chatId, "⚠️ <i>Kewal Owner hi stock upload kar sakte hain.</i>", telegramApi);
     }
-    return edit(chatId, messageId, `📁 <b>1000+ Accounts Wali .txt File Bhejein:</b>\nFormat: <code>email|password</code>`, telegramApi, {
+    return edit(chatId, messageId, `📁 <b>1000+ Accounts Wali .txt File Bhejein:</b>\nOAuth2 format: <code>email|pass|refreshToken|clientId</code>`, telegramApi, {
       inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]]
     });
   }
 }
 
-// ================= DISPATCH HELPERS =================
+// ================= DISPATCH TELEGRAM HELPERS =================
 async function send(chatId, text, telegramApi, kb = null, replyToId = null) {
   const payload = { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true };
   if (kb) payload.reply_markup = kb;

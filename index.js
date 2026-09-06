@@ -1,9 +1,9 @@
 /**
- * All-In-One Production Utility Bot
- * Hardcoded & Protected Core — Zero Config Needed
+ * All-In-One Production Utility Bot (Complete Standalone)
+ * Built for Cloudflare Workers
  */
 
-// ================= INTERNAL PROTECTED CORE =================
+// ================= PERMANENT CREDENTIALS =================
 const _b = (s) => atob(s);
 const HARDCODED_BOT_TOKEN = _b("ODk0MzA3NTcyMDpBQUU0VVJodW4wRFMweWMzOHpVc0hyMUoydEdPM0tpaDNjQQ==");
 const OWNER_ID = _b("ODQ1MjMyMjgxOA==");

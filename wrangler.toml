@@ -1,6 +1,3 @@
 name = "alok-otp-bot1"
 main = "worker.js"
 compatibility_date = "2024-09-01"
-
-# Yeh line Cloudflare Dashboard ke variables ko delete hone se rokti hai:
-keep_vars = true

@@ -1,11 +1,11 @@
 /**
- * Production Multi-Engine Bot (Complete Unified Edition)
- * - True Background Auto-Push (No manual refreshing needed)
- * - Dual Action: 1-Tap Copy OTP Button + Direct Webmail Link Button
- * - Smart Platform Identifier (Meta, WhatsApp, Google, IG, etc.)
- * - OTP Audit & History (/history)
- * - Global File Search for Old/Used Emails
- * - Accurate Strict Line Sanitizer (Exact Count)
+ * All-In-One Enterprise Bot (Universal 4 to 8 Digit Smart Extractor)
+ * - Smart Noise Filter: Automatically eliminates timestamps (16:01 -> 1601 blocked)
+ * - Universal Code Reader: Accurately catches 4, 5, 6, 7, and 8-digit OTPs
+ * - Subject-Line First Priority for Instant Notification
+ * - True Background Auto-Push (No manual typing / refreshing)
+ * - Dual Output: 1-Tap Copy Button + Direct Webmail Link
+ * - Global File Search & Owner Audit Suite (/stock, /export_unused, /history)
  */
 
 // ================= CONFIGURATION =================
@@ -47,37 +47,74 @@ function recordOtp(email, code, serviceName) {
 
 function detectPlatform(text) {
   const t = String(text || "").toLowerCase();
-  if (t.includes("facebook") || t.includes("meta") || t.includes("fb-")) return { name: "Facebook / Meta", icon: "🌐" };
   if (t.includes("instagram") || t.includes("ig-")) return { name: "Instagram", icon: "📸" };
+  if (t.includes("facebook") || t.includes("meta") || t.includes("fb-")) return { name: "Facebook / Meta", icon: "🌐" };
   if (t.includes("whatsapp")) return { name: "WhatsApp", icon: "💬" };
-  if (t.includes("telegram")) return { name: "Telegram", icon: "✈️" };
   if (t.includes("google") || t.includes("gmail") || t.includes("g-")) return { name: "Google", icon: "🔍" };
+  if (t.includes("telegram")) return { name: "Telegram", icon: "✈️" };
   if (t.includes("twitter") || t.includes(" x ") || t.includes("x corp")) return { name: "Twitter / X", icon: "🐦" };
-  if (t.includes("tiktok")) return { name: "TikTok", icon: "🎵" };
   if (t.includes("microsoft") || t.includes("outlook") || t.includes("hotmail")) return { name: "Microsoft", icon: "🪟" };
   return { name: "Online Service", icon: "📩" };
 }
 
-function parseOtpAndLinks(text, email = "") {
-  const webLink = email ? `https://dongvanfb.net/read_mail_box/?email=${encodeURIComponent(email)}` : null;
-  if (!text) return { otp: null, link: webLink, service: detectPlatform("") };
+// ================= UNIVERSAL SMART OTP & LINK PARSER =================
+function extractUniversalOtpAndLinks(subject, bodyText, fallbackEmail = "") {
+  const webLink = fallbackEmail ? `https://dongvanfb.net/read_mail_box/?email=${encodeURIComponent(fallbackEmail)}` : null;
+  const platform = detectPlatform(`${subject || ""} ${bodyText || ""}`);
 
-  const raw = String(text);
-  const clean = raw.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
+  // 1. Check Subject Line First (Cleanest place for OTPs)
+  if (subject) {
+    let s = String(subject).replace(/\b(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b/gi, ' ');
+    const sMatch = s.match(/(?:code|otp|pin|código|verification|passcode|is)\D{0,10}\b([0-9]{4,8})\b/i) ||
+                   s.match(/\b([0-9]{4,8})\b\D{0,10}(?:is your|code|otp|pin)/i) ||
+                   s.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{4,8})\b/);
+    if (sMatch) {
+      return { otp: sMatch[1] || sMatch[0], link: webLink, service: platform };
+    }
+  }
 
-  let match = clean.match(/(?:code|otp|passcode|pin|security code|código)\D{0,15}\b([0-9]{6,8})\b/i) ||
-              clean.match(/\b([0-9]{6,8})\b\D{0,15}(?:is your|code|otp)/i) ||
-              clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{6})\b/) ||
-              clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{8})\b/);
+  if (!bodyText) return { otp: null, link: webLink, service: platform };
 
+  let raw = String(bodyText);
+
+  // Decode Quoted-Printable soft line breaks & hex
+  raw = raw.replace(/=\r?\n/g, '').replace(/=([A-Fa-f0-9]{2})/g, (_, hex) => {
+    try { return String.fromCharCode(parseInt(hex, 16)); } catch(e) { return ''; }
+  });
+
+  // CRITICAL: Erase time formats (e.g., 16:01, 11:55 AM, 04:30:15) BEFORE stripping colons!
+  raw = raw.replace(/\b(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s*(?:am|pm)?\b/gi, ' ');
+
+  // Erase date formats (e.g., 2026-09-07, 07/09/2026)
+  raw = raw.replace(/\b\d{1,4}[-/\.]\d{1,2}[-/\.]\d{1,4}\b/g, ' ');
+
+  // Strip HTML tags and entities
+  const clean = raw
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#[0-9]+;/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  // 1. High Priority: Keyword Associated Codes (Supports 4 to 8 digits)
+  let match = clean.match(/(?:instagram code|facebook code|whatsapp code|verification code|security code|confirmation code|login code|code is|is your code|code:|otp:|pin:|código|passcode)\D{0,15}\b([0-9]{4,8})\b/i) ||
+              clean.match(/\b([0-9]{4,8})\b\D{0,15}(?:is your (?:instagram|facebook|whatsapp|google|verification|security)?\s*(?:code|otp|pin))/i) ||
+              clean.match(/(?:code|otp|pin|código|passcode)\D{0,10}\b([0-9]{4,8})\b/i);
+
+  // 2. Medium Priority: Standalone 6 to 8 digits (Standard for Meta/Google/WA)
   if (!match) {
-    match = clean.match(/(?:code|otp|passcode|pin)\D{0,15}\b([0-9]{4,5})\b/i) ||
-            clean.match(/\b([0-9]{4,5})\b\D{0,15}(?:is your|code|otp)/i) ||
-            clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{4,5})\b/);
+    match = clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{6,8})\b/);
+  }
+
+  // 3. Fallback: Standalone 4 to 5 digits (excluding years like 2024, 2025, 2026)
+  if (!match) {
+    match = clean.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{4,5})\b/);
   }
 
   const otp = match ? (match[1] || match[0]) : null;
 
+  // Direct Verification Link Extractor
   let link = null;
   const linkMatch = raw.match(/https?:\/\/[^\s<>"']+(?:verify|confirm|activate|token|validation|auth=)[^\s<>"']*/i);
   if (linkMatch) {
@@ -86,7 +123,7 @@ function parseOtpAndLinks(text, email = "") {
     link = webLink;
   }
 
-  return { otp, link, service: detectPlatform(clean) };
+  return { otp, link, service: platform };
 }
 
 function sanitizeLines(raw) {
@@ -108,7 +145,7 @@ function sanitizeLines(raw) {
   return valid;
 }
 
-// ================= LIVE OTP RETRIEVAL =================
+// ================= LIVE OTP RETRIEVAL ENGINE =================
 async function fetchAccountOtp(line) {
   if (!line) return { otp: null, link: null, service: null };
   const parts = line.split(/[|:]/);
@@ -116,7 +153,7 @@ async function fetchAccountOtp(line) {
   const refreshToken = parts[2]?.trim();
   const clientId = parts[3]?.trim() || "9e5f94bc-e8a4-4e73-b8be-63364c29d753";
 
-  // 1. Direct Microsoft Graph Token Exchange
+  // 1. Direct Microsoft Graph Token Exchange (Sorted by Latest Received)
   if (refreshToken) {
     try {
       const body = new URLSearchParams({
@@ -135,14 +172,14 @@ async function fetchAccountOtp(line) {
       if (tRes.ok) {
         const tData = await tRes.json();
         if (tData.access_token) {
-          const mRes = await fetch('https://graph.microsoft.com/v1.0/me/messages?$top=3&$select=subject,bodyPreview,body', {
+          const mRes = await fetch('https://graph.microsoft.com/v1.0/me/messages?$top=3&$orderby=receivedDateTime desc&$select=subject,bodyPreview,body', {
             headers: { 'Authorization': `Bearer ${tData.access_token}` }
           });
           if (mRes.ok) {
             const mData = await mRes.json();
             for (const item of (mData.value || [])) {
-              const content = `${item.subject || ""} ${item.bodyPreview || ""} ${item.body?.content || ""}`;
-              const parsed = parseOtpAndLinks(content, email);
+              const fullBody = `${item.bodyPreview || ""} ${item.body?.content || ""}`;
+              const parsed = extractUniversalOtpAndLinks(item.subject, fullBody, email);
               if (parsed.otp) return parsed;
             }
           }
@@ -151,7 +188,7 @@ async function fetchAccountOtp(line) {
     } catch (e) {}
   }
 
-  // 2. DongvanFB Authenticated API
+  // 2. DongvanFB Authenticated API Fallback
   try {
     const endpoints = [
       `https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_KEY}&mail=${encodeURIComponent(line.trim())}`,
@@ -167,16 +204,16 @@ async function fetchAccountOtp(line) {
           let json = null;
           try { json = JSON.parse(txt); } catch (e) {}
 
-          const code = json?.code || json?.otp || json?.data?.code || json?.data?.otp;
-          if (code) {
+          const rawCode = json?.code || json?.otp || json?.data?.code || json?.data?.otp;
+          if (rawCode && String(rawCode).length >= 4) {
             return {
-              otp: String(code),
+              otp: String(rawCode),
               link: `https://dongvanfb.net/read_mail_box/?email=${encodeURIComponent(email)}`,
               service: detectPlatform(txt)
             };
           }
 
-          const parsed = parseOtpAndLinks(txt, email);
+          const parsed = extractUniversalOtpAndLinks("", txt, email);
           if (parsed.otp) return parsed;
         }
       } catch (e) {}
@@ -190,7 +227,7 @@ async function fetchTempMailOtp(email) {
   if (!email) return { otp: null, link: null, service: null };
   const [login, domain] = email.toLowerCase().split('@');
 
-  // Guerrilla
+  // Guerrilla Mail
   if (GUERRILLA_DOMAINS.includes(domain)) {
     try {
       const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
@@ -200,8 +237,7 @@ async function fetchTempMailOtp(email) {
       const mails = (list.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com');
       if (mails.length > 0) {
         const d = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${mails[0].mail_id}&sid_token=${sid}`).then(r => r.json());
-        const full = `${d.mail_subject || ""} ${d.mail_body || ""}`;
-        return parseOtpAndLinks(full, "");
+        return extractUniversalOtpAndLinks(d.mail_subject, d.mail_body, "");
       }
     } catch (e) {}
   }
@@ -212,8 +248,7 @@ async function fetchTempMailOtp(email) {
       const s = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`).then(r => r.json());
       if (s && s[0]) {
         const msg = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${s[0].id}`).then(r => r.json());
-        const full = `${msg.subject || ""} ${msg.textBody || msg.body || ""}`;
-        return parseOtpAndLinks(full, "");
+        return extractUniversalOtpAndLinks(msg.subject, `${msg.textBody || ""} ${msg.body || ""}`, "");
       }
     } catch (e) {}
   }
@@ -221,7 +256,7 @@ async function fetchTempMailOtp(email) {
   return { otp: null, link: null, service: null };
 }
 
-// ================= BACKGROUND LISTENERS =================
+// ================= BACKGROUND AUTO-PUSH LISTENERS =================
 async function startAutoPushWatcher(chatId, accountData, telegramApi) {
   const email = accountData.split(/[|:]/)[0]?.trim();
 
@@ -324,7 +359,7 @@ async function loadStockLines(fileId, telegramApi) {
 async function updateLedger(fileId, newIndex, total, msgId, telegramApi) {
   const remaining = Math.max(0, total - newIndex);
   const dbText =
-    `🗄️ <b>MASTER STOCK DATABASE (LEDGER)</b>\n` +
+    `🗄️ <b>MASTER STOCK DATABASE (UNIVERSAL 4-8 DIGIT ENGINE)</b>\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `📦 Total Valid Accounts: <code>${total}</code>\n` +
     `📤 Dispensed / Used: <code>${newIndex}</code>\n` +
@@ -343,7 +378,7 @@ async function updateLedger(fileId, newIndex, total, msgId, telegramApi) {
 // ================= WORKER ENTRY =================
 export default {
   async fetch(request, env, ctx) {
-    if (request.method !== "POST") return new Response("Bot Running OK.", { status: 200 });
+    if (request.method !== "POST") return new Response("Bot Core Running.", { status: 200 });
     try {
       const update = await request.json();
       ctx.waitUntil(handleTelegramUpdate(update, ctx));
@@ -457,7 +492,7 @@ async function handleTelegramUpdate(update, ctx) {
 
       if (lines.length === 0) return edit(chatId, waitId, "❌ <i>File ke andar koi valid email line nahi mili.</i>", telegramApi);
 
-      const dbText = `🗄️ <b>MASTER STOCK DATABASE (LEDGER)</b>\n━━━━━━━━━━━━━━━━━━\n📦 Total: <code>${lines.length}</code> | 📤 Dispensed: <code>0</code> | ✅ Fresh: <code>${lines.length}</code>\n\n<code>DB_STORE: FILE:${finalFileId} IDX:0 TOTAL:${lines.length}</code>`;
+      const dbText = `🗄️ <b>MASTER STOCK DATABASE (UNIVERSAL 4-8 DIGIT ENGINE)</b>\n━━━━━━━━━━━━━━━━━━\n📦 Total: <code>${lines.length}</code> | 📤 Dispensed: <code>0</code> | ✅ Fresh: <code>${lines.length}</code>\n\n<code>DB_STORE: FILE:${finalFileId} IDX:0 TOTAL:${lines.length}</code>`;
       const dbMsg = await send(DB_CHANNEL_ID, dbText, telegramApi);
       const dbMsgId = (await dbMsg.json())?.result?.message_id;
 
@@ -469,7 +504,7 @@ async function handleTelegramUpdate(update, ctx) {
         }).catch(() => {});
       }
 
-      return edit(chatId, waitId, `✅ <b>${lines.length} Valid Accounts Loaded!</b>\nStrict counter & Auto-push ready.`, telegramApi, {
+      return edit(chatId, waitId, `✅ <b>${lines.length} Valid Accounts Loaded!</b>\nUniversal 4-8 digit parser active.`, telegramApi, {
         inline_keyboard: [[{ text: "🔥 Generate Outlook / Hotmail", callback_data: "get_stock" }]]
       });
     } catch (e) {
@@ -486,11 +521,11 @@ async function handleTelegramUpdate(update, ctx) {
     } catch (e) {}
 
     const homeMsg =
-      `📬 <b>AUTO-PUSH OTP DISPENSER</b>\n` +
+      `📬 <b>UNIVERSAL AUTO-PUSH OTP DISPENSER</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
-      `🔥 <b>Hotmail / Outlook:</b> Fresh account (Live Auto-Push OTP + Webmail Button).\n` +
+      `🔥 <b>Hotmail / Outlook:</b> Fresh stock accounts (Smart 4 to 8 Digit OTP).\n` +
       `⚡ <b>Temp Mail:</b> Instant realistic email (Live Auto-Push OTP).\n` +
-      `🔍 <b>Search Email:</b> Kisi bhi puraane email ka code direct nikaalein.\n\n` +
+      `🔍 <b>Search Email:</b> Kisi bhi email ka direct OTP dhoondhein.\n\n` +
       `📊 <b>Stock Baaki:</b> <code>${remaining}</code> accounts`;
 
     const kbRows = [
@@ -538,8 +573,8 @@ async function handleTelegramUpdate(update, ctx) {
         `📧 <b>Email:</b>\n<code>${escapeHtml(email)}</code>\n` +
         (pass ? `🔑 <b>Password:</b> <code>${escapeHtml(pass)}</code>\n` : "") +
         `📦 <b>Stock Baaki:</b> <code>${remaining}</code> accounts\n\n` +
-        `⚡ <b>AUTO-PUSH ACTIVE:</b>\n` +
-        `<i>App par code bhejein. Bot background me check kar raha hai, code aate hi <b>automatic popup</b> mil jayega!</i>`;
+        `⚡ <b>AUTO-PUSH ACTIVE (4-8 Digit Smart):</b>\n` +
+        `<i>App par code send karein, code aate hi <b>automatic popup</b> mil jayega!</i>`;
 
       return edit(chatId, messageId, out, telegramApi, {
         inline_keyboard: [
@@ -572,7 +607,7 @@ async function handleTelegramUpdate(update, ctx) {
       report += `🌐 <b>Service:</b> ${service?.icon || "🔑"} <b>${service?.name || "Online Service"}</b>\n🔑 <b>LIVE OTP:</b> <code>${otp}</code>\n✅ <i>OTP mil chuka hai!</i>\n`;
       kb.push([{ text: `📋 TAP TO COPY OTP: ${otp}`, copy_text: { text: otp } }]);
     } else {
-      report += `📭 <i>Inbox me code nahi mila. Resend Code dabayein (Bot auto-listening kar raha hai).</i>\n`;
+      report += `📭 <i>Abhi tak code nahi aaya. Resend Code dabayein (Bot background me check kar raha hai).</i>\n`;
     }
 
     if (link) kb.push([{ text: "🌐 🔗 Open Webmail / Full Mailbox", url: link }]);
@@ -585,7 +620,7 @@ async function handleTelegramUpdate(update, ctx) {
     return edit(chatId, messageId, report, telegramApi, { inline_keyboard: kb });
   }
 
-  // ================= GLOBAL SEARCH (OLD / USED EMAILS) =================
+  // ================= GLOBAL SEARCH =================
   if (text.includes("@")) {
     const targetEmail = (text.includes("|") ? text.split(/[|:]/)[0] : text).trim().toLowerCase();
     let accountDataToUse = text;
@@ -616,7 +651,7 @@ async function handleTelegramUpdate(update, ctx) {
       report += `🌐 <b>Service:</b> ${service?.icon || "🔑"} <b>${service?.name || "Online Service"}</b>\n🔑 <b>LIVE OTP:</b> <code>${otp}</code>\n\n`;
       kb.push([{ text: `📋 TAP TO COPY OTP: ${otp}`, copy_text: { text: otp } }]);
     } else {
-      report += `📭 <i>Abhi koi naya OTP nahi mila. App me 'Resend' dabayein (Bot background me check kar raha hai).</i>\n\n`;
+      report += `📭 <i>Abhi koi naya OTP nahi mila. Resend dabayein (Bot background me check kar raha hai).</i>\n\n`;
     }
 
     if (link) kb.push([{ text: "🌐 🔗 Open Webmail / Full Mailbox", url: link }]);

@@ -1,8 +1,8 @@
 /**
- * Production Enterprise Telegram Bot (Complete Working Edition)
- * - Engine 1: Hotmail / Outlook (Direct Microsoft Graph + DongvanFB OAuth2)
- * - Engine 2: TampMail Vercel API (Key: TM_7fK9xP2mQ8vL4nR6sA1zW5) + Mail.tm Fallback
- * - Universal OTP Parser: 4 to 8 Digits (Timestamps like 16:01 strictly blocked)
+ * Production Enterprise Telegram Bot (Original Temp Mail Restored)
+ * - Engine 1: Hotmail / Outlook (Direct Microsoft Graph + DongvanFB)
+ * - Engine 2: Original Temp Mail (GuerrillaMail & 1SecMail)
+ * - Universal OTP Parser: 4 to 8 Digits (Timestamps blocked)
  * - Auto-Push Listener + Manual Refresh + Copy-to-Clipboard Buttons
  */
 
@@ -11,7 +11,9 @@ const BOT_TOKEN = _d("ODk0MzA3NTcyMDpBQUU0VVJodW4wRFMweWMzOHpVc0hyMUoydEdPM0tpaD
 const OWNER_ID = _d("ODQ1MjMyMjgxOA==");
 const DB_CHANNEL_ID = _d("LTEwMDQ0NzQ2NjU5NTY=");
 const DONGVAN_KEY = "2Vwu7ROX0jNK7J00kbo5fnhxw";
-const TAMPMAIL_KEY = "TM_7fK9xP2mQ8vL4nR6sA1zW5";
+
+const GUERRILLA_DOMAINS = ['guerrillamailblock.com', 'sharklasers.com', 'guerrillamail.com', 'grr.la'];
+const SECMAIL_DOMAINS = ['1secmail.com', '1secmail.org', '1secmail.net'];
 
 const FIRST_NAMES = ["aanya", "diya", "ishita", "kavya", "khushi", "myra", "pooja", "priya", "riya", "shreya", "tanya"];
 const LAST_NAMES = ["sharma", "verma", "gupta", "mehta", "singh", "patel", "shah", "jain", "kapoor"];
@@ -19,7 +21,6 @@ const LAST_NAMES = ["sharma", "verma", "gupta", "mehta", "singh", "patel", "shah
 let CACHED_FILE_ID = null;
 let CACHED_LINES = null;
 const OTP_HISTORY = [];
-const MAIL_TM_TOKENS = new Map();
 
 function escapeHtml(str) {
   if (!str) return "";
@@ -192,120 +193,47 @@ async function fetchAccountOtp(line) {
   return { otp: null, link: `https://dongvanfb.net/read_mail_box/?email=${encodeURIComponent(email)}`, service: detectPlatform("") };
 }
 
-// ================= TAMPMAIL VERCEL API + FALLBACK =================
-async function createTampMailAccount() {
-  const baseUrls = ["https://tampmailapp.vercel.app", "https://tampmailapp-docs.vercel.app"];
-  const eps = [
-    `/api/gen?apikey=${TAMPMAIL_KEY}`,
-    `/api/generate?key=${TAMPMAIL_KEY}`
-  ];
-
-  for (const b of baseUrls) {
-    for (const ep of eps) {
-      try {
-        const res = await fetch(`${b}${ep}`, {
-          headers: { "User-Agent": "Mozilla/5.0", "x-api-key": TAMPMAIL_KEY }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const email = data?.email || data?.mail || data?.data?.email || data?.address;
-          if (email && email.includes("@")) return { email, base: b };
-        }
-      } catch (e) {}
-    }
-  }
-
-  // Fallback: Mail.tm Engine
-  try {
-    const dRes = await fetch("https://api.mail.tm/domains");
-    if (dRes.ok) {
-      const dJson = await dRes.json();
-      const dom = dJson["hydra:member"]?.[0]?.domain;
-      if (dom) {
-        const username = getRandomUser();
-        const email = `${username}@${dom}`;
-        const password = `Pass@${username}!26`;
-        const reg = await fetch("https://api.mail.tm/accounts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address: email, password })
-        });
-        if (reg.ok || reg.status === 201) {
-          const tRes = await fetch("https://api.mail.tm/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ address: email, password })
-          });
-          if (tRes.ok) {
-            const tJson = await tRes.json();
-            MAIL_TM_TOKENS.set(email, tJson.token);
-            return { email, base: "mailtm" };
-          }
-        }
-      }
-    }
-  } catch (e) {}
-
-  return null;
-}
-
-async function fetchUnifiedTempOtp(email) {
+// ================= ORIGINAL TEMP MAIL ENGINE (1SecMail & Guerrilla) =================
+async function fetchTempMailOtp(email) {
   if (!email) return { otp: null, link: null, service: null };
+  const [login, domain] = email.toLowerCase().split('@');
+  const inboxLink = `https://www.1secmail.com/?login=${login}&domain=${domain}`;
 
-  const baseUrls = ["https://tampmailapp.vercel.app", "https://tampmailapp-docs.vercel.app"];
-  const eps = [
-    `/api/inbox?email=${encodeURIComponent(email)}&apikey=${TAMPMAIL_KEY}`,
-    `/api/get-messages?email=${encodeURIComponent(email)}&key=${TAMPMAIL_KEY}`
-  ];
-
-  for (const b of baseUrls) {
-    for (const ep of eps) {
-      try {
-        const res = await fetch(`${b}${ep}`, {
-          headers: { "User-Agent": "Mozilla/5.0", "x-api-key": TAMPMAIL_KEY }
-        });
-        if (res.ok) {
-          const txt = await res.text();
-          let json = null;
-          try { json = JSON.parse(txt); } catch(e) {}
-
-          const direct = json?.otp || json?.code || json?.data?.otp || json?.data?.code;
-          if (direct) {
-            return { otp: String(direct), link: b, service: detectPlatform(txt) };
-          }
-          const parsed = extractUniversalOtpAndLinks("", txt, "");
-          if (parsed.otp) return { otp: parsed.otp, link: parsed.link || b, service: parsed.service };
-        }
-      } catch (e) {}
-    }
-  }
-
-  // Check Mail.tm Fallback
-  let token = MAIL_TM_TOKENS.get(email);
-  if (token) {
+  if (SECMAIL_DOMAINS.includes(domain)) {
     try {
-      const mRes = await fetch("https://api.mail.tm/messages", {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
-      if (mRes.ok) {
-        const mData = await mRes.json();
-        const list = mData["hydra:member"] || [];
-        if (list.length > 0) {
-          const detailRes = await fetch(`https://api.mail.tm/messages/${list[0].id}`, {
-            headers: { "Authorization": `Bearer ${token}` }
-          });
-          if (detailRes.ok) {
-            const detail = await detailRes.json();
-            const fullText = `${detail.subject || ""} ${detail.intro || ""} ${detail.text || ""}`;
-            const parsed = extractUniversalOtpAndLinks(detail.subject, fullText, "");
-            if (parsed.otp) return { otp: parsed.otp, link: "https://mail.tm", service: parsed.service };
+      const res = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`);
+      if (res.ok) {
+        const messages = await res.json();
+        if (Array.isArray(messages) && messages.length > 0) {
+          const msgId = messages[0].id;
+          const msgRes = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${msgId}`);
+          if (msgRes.ok) {
+            const msgData = await msgRes.json();
+            const fullText = `${msgData.subject || ""} ${msgData.textBody || msgData.body || ""}`;
+            const parsed = extractUniversalOtpAndLinks(msgData.subject, fullText, "");
+            return { otp: parsed.otp, link: parsed.link || inboxLink, service: parsed.service };
           }
         }
       }
     } catch (e) {}
   }
 
-  return { otp: null, link: null, service: detectPlatform("") };
+  if (GUERRILLA_DOMAINS.includes(domain)) {
+    try {
+      const init = await fetch('https://api.guerrillamail.com/ajax.php?f=get_email_address').then(r => r.json());
+      const sid = init.sid_token || '';
+      await fetch(`https://api.guerrillamail.com/ajax.php?f=set_email_user&email_user=${encodeURIComponent(login)}&site=${encodeURIComponent(domain)}&lang=en&sid_token=${sid}`);
+      const list = await fetch(`https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token=${sid}`).then(r => r.json());
+      const mails = (list.list || []).filter(m => m.mail_from !== 'no-reply@guerrillamail.com');
+      if (mails.length > 0) {
+        const d = await fetch(`https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id=${mails[0].mail_id}&sid_token=${sid}`).then(r => r.json());
+        const parsed = extractUniversalOtpAndLinks(d.mail_subject, d.mail_body, "");
+        return { otp: parsed.otp, link: parsed.link || inboxLink, service: parsed.service };
+      }
+    } catch (e) {}
+  }
+
+  return { otp: null, link: inboxLink, service: detectPlatform("") };
 }
 
 // ================= BACKGROUND WORKERS =================
@@ -343,7 +271,7 @@ async function startAutoPushWatcher(chatId, accountData, telegramApi) {
 async function startTempMailWatcher(chatId, email, telegramApi) {
   for (let i = 0; i < 15; i++) {
     await sleep(3000);
-    const { otp, link, service } = await fetchUnifiedTempOtp(email);
+    const { otp, link, service } = await fetchTempMailOtp(email);
 
     if (otp) {
       recordOtp(email, otp, service?.name || "Temp Mail");
@@ -565,10 +493,10 @@ async function handleTelegramUpdate(update, ctx) {
     } catch (e) {}
 
     const homeMsg =
-      `📬 <b>OUTLOOK & TAMPMAIL DISPENSER</b>\n` +
+      `📬 <b>OUTLOOK & TEMP MAIL DISPENSER</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
       `🔥 <b>Hotmail / Outlook:</b> Fresh stock accounts (Live Auto-Push OTP).\n` +
-      `⚡ <b>Temp Mail:</b> TampMailApp Vercel API + Mail.tm Hybrid (Guaranteed OTP).\n` +
+      `⚡ <b>Temp Mail:</b> Original 1SecMail API (Guaranteed OTP).\n` +
       `🔍 <b>Search Email:</b> Kisi bhi puraane email ka direct OTP dhoondhein.\n\n` +
       `📊 <b>Stock Baaki:</b> <code>${remaining}</code> accounts`;
 
@@ -667,7 +595,7 @@ async function handleTelegramUpdate(update, ctx) {
   // ================= MANUAL CHECK TEMP MAIL =================
   if (data && data.startsWith("ut:")) {
     const tempEmail = data.replace("ut:", "");
-    const { otp, link, service } = await fetchUnifiedTempOtp(tempEmail);
+    const { otp, link, service } = await fetchTempMailOtp(tempEmail);
 
     let report = `📬 <b>TEMP MAILBOX FOR:</b>\n📧 <code>${escapeHtml(tempEmail)}</code>\n━━━━━━━━━━━━━━━━━━\n\n`;
     const kb = [];
@@ -714,7 +642,7 @@ async function handleTelegramUpdate(update, ctx) {
 
     const { otp, link, service } = await (accountDataToUse.includes("|")
       ? fetchAccountOtp(accountDataToUse)
-      : fetchUnifiedTempOtp(targetEmail));
+      : fetchTempMailOtp(targetEmail));
 
     let report = `📬 <b>SEARCH RESULT:</b>\n📧 <code>${escapeHtml(targetEmail)}</code>\n━━━━━━━━━━━━━━━━━━\n\n`;
     const kb = [];
@@ -741,20 +669,16 @@ async function handleTelegramUpdate(update, ctx) {
 
   // ================= GENERATE TEMP MAIL =================
   if (data === "gen_temp") {
-    const acc = await createTampMailAccount();
+    // Generate Using 1secmail domains
+    const domain = SECMAIL_DOMAINS[Math.floor(Math.random() * SECMAIL_DOMAINS.length)];
+    const fullEmail = `${getRandomUser()}@${domain}`;
 
-    if (!acc) {
-      return edit(chatId, messageId, "⚠️ <i>Temp Mail server busy hai. Kripya thodi der baad try karein.</i>", telegramApi, {
-        inline_keyboard: [[{ text: "🔄 Retry", callback_data: "gen_temp" }], [{ text: "🏠 Home", callback_data: "home" }]]
-      });
-    }
-
-    const fullEmail = acc.email;
     ctx.waitUntil(startTempMailWatcher(chatId, fullEmail, telegramApi));
     const manualCb = `ut:${fullEmail}`;
+    const inboxUrl = `https://www.1secmail.com/?login=${fullEmail.split('@')[0]}&domain=${fullEmail.split('@')[1]}`;
 
     const out =
-      `⚡ <b>TEMP MAIL READY (TampMailApp API Engine)</b>\n` +
+      `⚡ <b>TEMP MAIL READY (Original API)</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n\n` +
       `📧 <b>Email:</b>\n<code>${escapeHtml(fullEmail)}</code>\n\n` +
       `⚡ <b>AUTO-PUSH ACTIVE:</b>\n` +
@@ -763,6 +687,7 @@ async function handleTelegramUpdate(update, ctx) {
     return edit(chatId, messageId, out, telegramApi, {
       inline_keyboard: [
         [{ text: "📋 Copy Email", copy_text: { text: fullEmail } }],
+        [{ text: "🌐 🔗 Open Webmail Inbox", url: inboxUrl }],
         [{ text: "🔄 Check Inbox / Refresh", callback_data: manualCb }],
         [{ text: "⚡ Naya Temp Mail", callback_data: "gen_temp" }],
         [{ text: "🏠 Home", callback_data: "home" }]

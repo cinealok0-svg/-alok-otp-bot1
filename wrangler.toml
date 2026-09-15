@@ -1,3 +1,4 @@
 name = "alok-otp-bot1"
 main = "src/worker.js"
 compatibility_date = "2024-09-01"
+compatibility_flags = [ "nodejs_compat" ]

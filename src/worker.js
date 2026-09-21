@@ -1,5 +1,5 @@
 /**
- * Classic Temp Mail Style UI Engine
+ * Ultra Fast Step-by-Step Temp Mail Engine
  * Domain: vibepulsemedia.online
  */
 
@@ -21,28 +21,32 @@ const ALLOWED_SENDERS = [
   "meta.ai"
 ];
 
+// Optimized Female Names Pool
 const FEMALE_NAMES = [
   "priya", "ananya", "sneha", "pooja", "neha", "riya", "simran", "kajal",
   "khushi", "aditi", "shreya", "tanvi", "mansi", "divya", "muskan", "aarushi",
   "ishika", "sakshi", "pallavi", "swati", "anjali", "kriti", "megha", "komal",
-  "sonam", "preeti", "jyoti", "rekha", "payal", "varsha", "shikha", "nisha"
+  "sonam", "preeti", "jyoti", "rekha", "payal", "varsha", "shikha", "nisha",
+  "tanya", "deepika", "radhika", "monika", "garima", "ekta", "kavita", "saloni"
 ];
 
 const SURNAMES = [
   "sharma", "verma", "singh", "patel", "kumar", "yadav", "gupta", "mishra",
-  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "dubey"
+  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "dubey",
+  "sen", "bose", "roy", "nair", "reddy", "kashyap", "bhardwaj", "saxena"
 ];
 
 export default {
+  // --- 1. WEBHOOK DISPATCHER ---
   async fetch(request, env, ctx) {
     if (request.method !== "POST") return new Response("OK", { status: 200 });
 
     try {
       const update = await request.json();
       if (update.message) {
-        await handleMessage(update.message);
+        ctx.waitUntil(handleMessage(update.message));
       } else if (update.callback_query) {
-        await handleCallback(update.callback_query);
+        ctx.waitUntil(handleCallback(update.callback_query));
       }
       return new Response("OK", { status: 200 });
     } catch (err) {
@@ -50,11 +54,13 @@ export default {
     }
   },
 
+  // --- 2. EMAIL ROUTING (OTP EXTRACTION) ---
   async email(message, env, ctx) {
     try {
       const fromEmail = (message.from || "").toLowerCase().trim();
       const toEmail = (message.to || "").toLowerCase().trim();
 
+      // Only Meta / Instagram allowed
       const isAllowed = ALLOWED_SENDERS.some(d => fromEmail.endsWith(d) || fromEmail.includes(d));
       if (!isAllowed) return;
 
@@ -71,12 +77,12 @@ export default {
 
       const cleanBody = parseEmailContent(rawContent);
 
-      // Deep OTP match
-      const otpRegex = /(?:code|otp|pin|security)[\s:=–-]{1,6}(\b\d{6}\b)/i;
+      // Fast OTP Match (6 digits)
+      const otpRegex = /(?:code|otp|pin|security|passcode)[\s:=–-]{1,6}(\b\d{6}\b)/i;
       const otpMatch = cleanBody.match(otpRegex) || cleanBody.match(/\b\d{6}\b/);
       const extractedOtp = otpMatch ? (otpMatch[1] || otpMatch[0]) : null;
 
-      // Link finder
+      // Link match
       const linkRegex = /(https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*)/i;
       const linkMatch = cleanBody.match(linkRegex);
       const verifyLink = linkMatch ? linkMatch[0] : null;
@@ -95,18 +101,20 @@ export default {
 
       if (!targetChatId) isSystemMail = true;
 
+      // Pure isolated OTP delivery
       if (isSystemMail) {
         for (const adminId of ADMINS) {
-          await sendTempMailNotification(adminId, toEmail, extractedOtp, verifyLink, true);
+          await deliverOtpMessage(adminId, extractedOtp, toEmail, verifyLink);
         }
       } else if (targetChatId) {
-        await sendTempMailNotification(targetChatId, toEmail, extractedOtp, verifyLink, false);
+        await deliverOtpMessage(targetChatId, extractedOtp, toEmail, verifyLink);
       }
 
+      // Log Channel
       if (DB_CHANNEL_ID) {
         await callTelegram("sendMessage", {
           chat_id: DB_CHANNEL_ID,
-          text: `Log: \`${toEmail}\` | OTP: \`${extractedOtp || "Link"}\``,
+          text: `Log: \`${toEmail}\` | Code: \`${extractedOtp || "Link"}\``,
           parse_mode: "Markdown"
         });
       }
@@ -116,28 +124,20 @@ export default {
   }
 };
 
-// Temp-Mail Notification Layout
-async function sendTempMailNotification(chatId, toEmail, otp, link, isAdmin) {
-  let text = `📬 *INBOX (1 New Message)*\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `📧 *Mailbox:* \`${toEmail}\`\n\n`;
-
+// Pure Single-Tap Copy OTP Message
+async function deliverOtpMessage(chatId, otp, toEmail, link) {
+  let text = "";
   if (otp) {
-    text += `🔑 *OTP CODE:*\n`;
-    text += `👉 \`${otp}\` 👈\n\n`;
-    text += `_(Tap to copy code)_\n`;
+    text = `\`${otp}\`\n\n_${toEmail}_`;
+  } else {
+    text = `Link Received\n_${toEmail}_`;
   }
-
-  text += `━━━━━━━━━━━━━━━━━━━━━`;
 
   let buttons = [];
   if (link) {
-    buttons.push([{ text: "🔗 Open Verification Link", url: link }]);
+    buttons.push([{ text: "🔗 Open Link", url: link }]);
   }
-  buttons.push([
-    { text: "🔄 Change Email", callback_data: "action_change" },
-    { text: "🗑 Delete", callback_data: "action_delete" }
-  ]);
+  buttons.push([{ text: "🔄 Change Email", callback_data: "action_generate" }]);
 
   await callTelegram("sendMessage", {
     chat_id: chatId,
@@ -147,13 +147,14 @@ async function sendTempMailNotification(chatId, toEmail, otp, link, isAdmin) {
   });
 }
 
-// Telegram Command Logic
+// Telegram Message Router
 async function handleMessage(msg) {
   const chatId = msg.chat.id.toString();
   const text = (msg.text || "").trim();
   const isOwner = (chatId === PRIMARY_OWNER_ID.toString());
   const isAdmin = ADMINS.has(chatId) || isOwner;
 
+  // Master Authority Commands
   if (text.startsWith("/transferowner") && isOwner) {
     const target = text.split(" ")[1];
     if (target && /^\d+$/.test(target)) {
@@ -168,7 +169,7 @@ async function handleMessage(msg) {
     const target = text.split(" ")[1];
     if (target && /^\d+$/.test(target)) {
       ADMINS.add(target.trim());
-      await callTelegram("sendMessage", { chat_id: chatId, text: `✅ Admin added: \`${target}\``, parse_mode: "Markdown" });
+      await callTelegram("sendMessage", { chat_id: chatId, text: `✅ Added: \`${target}\``, parse_mode: "Markdown" });
     }
     return;
   }
@@ -182,15 +183,32 @@ async function handleMessage(msg) {
     return;
   }
 
-  // Classic Temp Mail Screen on /start or /gen
-  if (text === "/start" || text === "/gen") {
-    await renderTempMailDashboard(chatId, false, null, isAdmin);
-  } else if (text === "/id") {
-    await callTelegram("sendMessage", { chat_id: chatId, text: `Your ID: \`${chatId}\``, parse_mode: "Markdown" });
+  // STEP 1: /start karne par seedhe portal menu aayega (Email abhi generate nahi hoga)
+  if (text === "/start") {
+    let buttons = [
+      [{ text: "⚡ Generate Email", callback_data: "action_generate" }]
+    ];
+    if (isAdmin) {
+      buttons.push([{ text: "🔑 Old Email Hub", callback_data: "admin_old_mails" }]);
+    }
+
+    await callTelegram("sendMessage", {
+      chat_id: chatId,
+      text: "⚡ *Meta & Instagram Temp Mail*\n\nNiche button par tap karke instant email generate karein:",
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: buttons }
+    });
+  }
+  // Agar koi command se /gen kare toh direct email
+  else if (text === "/gen") {
+    await sendPureEmailCard(chatId, false, null, isAdmin);
+  }
+  else if (text === "/id") {
+    await callTelegram("sendMessage", { chat_id: chatId, text: `\`${chatId}\``, parse_mode: "Markdown" });
   }
 }
 
-// Callback Engine (Buttons)
+// STEP 2 & 3: Fast Inline Button Clicks
 async function handleCallback(query) {
   const chatId = query.message.chat.id.toString();
   const messageId = query.message.message_id;
@@ -198,62 +216,37 @@ async function handleCallback(query) {
   const isOwner = (chatId === PRIMARY_OWNER_ID.toString());
   const isAdmin = ADMINS.has(chatId) || isOwner;
 
+  // Turant answer karo taaki Telegram par button instant unlock ho
   await callTelegram("answerCallbackQuery", { callback_query_id: query.id });
 
-  if (data === "action_change") {
-    await renderTempMailDashboard(chatId, true, messageId, isAdmin);
+  if (data === "action_generate") {
+    // Ultra fast in-place text update
+    await sendPureEmailCard(chatId, true, messageId, isAdmin);
   } 
-  else if (data === "action_refresh") {
-    await callTelegram("answerCallbackQuery", { 
-      callback_query_id: query.id, 
-      text: "Inbox checked. No new mail!", 
-      show_alert: false 
-    });
-  } 
-  else if (data === "action_delete") {
-    await renderTempMailDashboard(chatId, true, messageId, isAdmin);
-  }
-  else if (data === "admin_hub" && isAdmin) {
-    const hubText = 
-      `🔐 *Old & Root Mailbox Hub*\n\n` +
-      `System emails ke verification codes yahan auto receive hote hain.\n\n` +
-      `Specific mail monitor command:\n` +
-      `\`/watch name@${DOMAIN}\``;
-
-    const btns = [[{ text: "🔙 Back", callback_data: "action_change" }]];
+  else if (data === "admin_old_mails" && isAdmin) {
+    const info = `Old Email Monitor:\n\`/watch name@${DOMAIN}\``;
+    const btns = [[{ text: "🔙 Back", callback_data: "action_generate" }]];
     await callTelegram("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
-      text: hubText,
+      text: info,
       parse_mode: "Markdown",
       reply_markup: { inline_keyboard: btns }
     });
   }
 }
 
-// Classic Temp-Mail Dashboard Card
-async function renderTempMailDashboard(chatId, isEdit = false, messageId = null, isAdmin = false) {
-  const email = generateFemaleEmail(chatId);
-
-  let text = `📬 *YOUR TEMPORARY EMAIL ADDRESS*\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-  text += `\`${email}\`\n\n`;
-  text += `_(Tap email to copy)_\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `Status: 🟢 *Waiting for incoming mail...*`;
+// PURE EMAIL CARD: Screen par sirf aur sirf Email text rahega (100% pure tap-to-copy)
+async function sendPureEmailCard(chatId, isEdit = false, messageId = null, isAdmin = false) {
+  const email = generateFastFemaleEmail(chatId);
+  const text = `\`${email}\``;
 
   let buttons = [
-    [
-      { text: "🔄 Change Email", callback_data: "action_change" },
-      { text: "📬 Refresh", callback_data: "action_refresh" }
-    ],
-    [
-      { text: "🗑 Delete", callback_data: "action_delete" }
-    ]
+    [{ text: "🔄 Change Email", callback_data: "action_generate" }]
   ];
 
   if (isAdmin) {
-    buttons.push([{ text: "🔑 Old Email Hub", callback_data: "admin_hub" }]);
+    buttons.push([{ text: "🔑 Old Email Hub", callback_data: "admin_old_mails" }]);
   }
 
   if (isEdit && messageId) {
@@ -274,13 +267,13 @@ async function renderTempMailDashboard(chatId, isEdit = false, messageId = null,
   }
 }
 
-function generateFemaleEmail(chatId) {
-  const first = FEMALE_NAMES[Math.floor(Math.random() * FEMALE_NAMES.length)];
-  const last = SURNAMES[Math.floor(Math.random() * SURNAMES.length)];
-  const num = Math.floor(1000 + Math.random() * 9000);
+// Ultra Fast Female Email Generator
+function generateFastFemaleEmail(chatId) {
+  const first = FEMALE_NAMES[(Math.random() * FEMALE_NAMES.length) | 0];
+  const last = SURNAMES[(Math.random() * SURNAMES.length) | 0];
+  const num = ((Math.random() * 9000) | 0) + 1000;
   const sep = Math.random() > 0.5 ? "." : "";
-  const randomUser = `${first}${sep}${last}${num}`;
-  return `${chatId}x${randomUser}@${DOMAIN}`;
+  return `${chatId}x${first}${sep}${last}${num}@${DOMAIN}`;
 }
 
 function parseEmailContent(raw) {

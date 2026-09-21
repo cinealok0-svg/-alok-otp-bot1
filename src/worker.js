@@ -1,19 +1,17 @@
 /**
- * Enterprise Meta/Instagram Temp Mail Engine
+ * Classic Temp Mail Style UI Engine
  * Domain: vibepulsemedia.online
  */
 
-// --- CORE SYSTEM SETTINGS ---
 const BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA";
 let PRIMARY_OWNER_ID = "8452322818";
 const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
-// In-Memory Storage
 let ADMINS = new Set([PRIMARY_OWNER_ID.toString()]);
-let ADMIN_WATCHED_EMAILS = new Map(); // target_email -> admin_chat_id
+let ADMIN_WATCHED_EMAILS = new Map();
 
-// Strict Meta Ecosystem Whitelist (Zero external legal risks)
+// Strict Meta & Instagram Filter
 const ALLOWED_SENDERS = [
   "instagram.com",
   "mail.instagram.com",
@@ -23,59 +21,43 @@ const ALLOWED_SENDERS = [
   "meta.ai"
 ];
 
-// Curated Authentic Female Names
 const FEMALE_NAMES = [
   "priya", "ananya", "sneha", "pooja", "neha", "riya", "simran", "kajal",
   "khushi", "aditi", "shreya", "tanvi", "mansi", "divya", "muskan", "aarushi",
   "ishika", "sakshi", "pallavi", "swati", "anjali", "kriti", "megha", "komal",
-  "sonam", "preeti", "jyoti", "rekha", "payal", "varsha", "shikha", "nisha",
-  "tanya", "deepika", "radhika", "monika", "garima", "ekta", "kavita", "saloni",
-  "alisha", "anushka", "diya", "prachi", "natasha", "rashmi", "bhavna"
+  "sonam", "preeti", "jyoti", "rekha", "payal", "varsha", "shikha", "nisha"
 ];
 
-// Curated Indian Surnames
 const SURNAMES = [
   "sharma", "verma", "singh", "patel", "kumar", "yadav", "gupta", "mishra",
-  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "dubey",
-  "sen", "bose", "roy", "nair", "reddy", "kashyap", "bhardwaj", "saxena",
-  "choudhary", "rawat", "malhotra", "kapoor", "shukla", "tripathi"
+  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "dubey"
 ];
 
 export default {
-  // --- 1. TELEGRAM WEBHOOK ENGINE ---
   async fetch(request, env, ctx) {
-    if (request.method !== "POST") {
-      return new Response("⚡ Meta Worker Running", { status: 200 });
-    }
+    if (request.method !== "POST") return new Response("OK", { status: 200 });
 
     try {
       const update = await request.json();
-
       if (update.message) {
         await handleMessage(update.message);
       } else if (update.callback_query) {
         await handleCallback(update.callback_query);
       }
-
       return new Response("OK", { status: 200 });
     } catch (err) {
       return new Response("Error: " + err.message, { status: 500 });
     }
   },
 
-  // --- 2. CLOUDFLARE EMAIL PIPELINE ---
   async email(message, env, ctx) {
     try {
       const fromEmail = (message.from || "").toLowerCase().trim();
       const toEmail = (message.to || "").toLowerCase().trim();
 
-      // Strict Sender Filter: Block unauthorized external traffic
       const isAllowed = ALLOWED_SENDERS.some(d => fromEmail.endsWith(d) || fromEmail.includes(d));
-      if (!isAllowed) {
-        return; // Auto drop
-      }
+      if (!isAllowed) return;
 
-      // Stream Parser
       const rawStream = message.raw;
       const reader = rawStream.getReader();
       let rawContent = "";
@@ -87,90 +69,75 @@ export default {
         rawContent += decoder.decode(value, { stream: true });
       }
 
-      // Extract Clean Body Text
       const cleanBody = parseEmailContent(rawContent);
 
-      // Deep 6-Digit Code Extractor (Meta/Instagram Standard)
-      const otpRegex = /(?:code|otp|pin|security|código|passcode)[\s:=–-]{1,6}(\b\d{6}\b)/i;
+      // Deep OTP match
+      const otpRegex = /(?:code|otp|pin|security)[\s:=–-]{1,6}(\b\d{6}\b)/i;
       const otpMatch = cleanBody.match(otpRegex) || cleanBody.match(/\b\d{6}\b/);
       const extractedOtp = otpMatch ? (otpMatch[1] || otpMatch[0]) : null;
 
-      // Extract Action Links
+      // Link finder
       const linkRegex = /(https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*)/i;
       const linkMatch = cleanBody.match(linkRegex);
       const verifyLink = linkMatch ? linkMatch[0] : null;
 
-      // Routing Architecture
       const localPart = toEmail.split("@")[0];
       let targetChatId = null;
       let isSystemMail = false;
 
-      // Check Admin Targeted Watchlist
       if (ADMIN_WATCHED_EMAILS.has(toEmail)) {
         targetChatId = ADMIN_WATCHED_EMAILS.get(toEmail);
         isSystemMail = true;
-      } 
-      // Parse User Session format: {chatId}x{name}@domain
-      else if (localPart.includes("x")) {
+      } else if (localPart.includes("x")) {
         const potentialId = localPart.split("x")[0];
-        if (/^\d+$/.test(potentialId)) {
-          targetChatId = potentialId;
-        }
+        if (/^\d+$/.test(potentialId)) targetChatId = potentialId;
       }
 
-      // Old/System Address Fallback
-      if (!targetChatId) {
-        isSystemMail = true;
-      }
+      if (!targetChatId) isSystemMail = true;
 
-      // Deliveries
       if (isSystemMail) {
         for (const adminId of ADMINS) {
-          await sendOtpCard(adminId, toEmail, extractedOtp, verifyLink, true);
+          await sendTempMailNotification(adminId, toEmail, extractedOtp, verifyLink, true);
         }
       } else if (targetChatId) {
-        await sendOtpCard(targetChatId, toEmail, extractedOtp, verifyLink, false);
+        await sendTempMailNotification(targetChatId, toEmail, extractedOtp, verifyLink, false);
       }
 
-      // Channel Audit Log
       if (DB_CHANNEL_ID) {
         await callTelegram("sendMessage", {
           chat_id: DB_CHANNEL_ID,
-          text: `Log: \`${toEmail}\` | Code: \`${extractedOtp || "Link"}\``,
+          text: `Log: \`${toEmail}\` | OTP: \`${extractedOtp || "Link"}\``,
           parse_mode: "Markdown"
         });
       }
     } catch (e) {
-      console.error("Email Ingestion Error: " + e.message);
+      console.error("Email Error: " + e.message);
     }
   }
 };
 
-// --- CARD BUILDERS & NOTIFIERS ---
-
-async function sendOtpCard(chatId, toEmail, otp, link, isAdminRoute) {
-  let text = "";
+// Temp-Mail Notification Layout
+async function sendTempMailNotification(chatId, toEmail, otp, link, isAdmin) {
+  let text = `📬 *INBOX (1 New Message)*\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  text += `📧 *Mailbox:* \`${toEmail}\`\n\n`;
 
   if (otp) {
-    text += `🔐 *YOUR VERIFICATION CODE:*\n\n`;
-    text += `\`${otp}\`\n\n`;
+    text += `🔑 *OTP CODE:*\n`;
+    text += `👉 \`${otp}\` 👈\n\n`;
     text += `_(Tap to copy code)_\n`;
-    text += `──────────────────\n`;
-  } else {
-    text += `📩 *New Meta Email Received*\n`;
-    text += `──────────────────\n`;
   }
 
-  if (isAdminRoute) {
-    text += `🛡️ *Mailbox:* Admin/Old Address\n`;
-  }
-  text += `📧 *Mail:* \`${toEmail}\``;
+  text += `━━━━━━━━━━━━━━━━━━━━━`;
 
   let buttons = [];
   if (link) {
-    buttons.push([{ text: "🌐 Open Verification Link", url: link }]);
+    buttons.push([{ text: "🔗 Open Verification Link", url: link }]);
   }
-  buttons.push([{ text: "🔄 Next Email", callback_data: "action_next" }]);
+  buttons.push([
+    { text: "🔄 Change Email", callback_data: "action_change" },
+    { text: "🗑 Delete", callback_data: "action_delete" }
+  ]);
 
   await callTelegram("sendMessage", {
     chat_id: chatId,
@@ -180,71 +147,50 @@ async function sendOtpCard(chatId, toEmail, otp, link, isAdminRoute) {
   });
 }
 
-// --- COMMAND & MESSAGE LOGIC ---
-
+// Telegram Command Logic
 async function handleMessage(msg) {
   const chatId = msg.chat.id.toString();
   const text = (msg.text || "").trim();
   const isOwner = (chatId === PRIMARY_OWNER_ID.toString());
   const isAdmin = ADMINS.has(chatId) || isOwner;
 
-  // Master Authority Transfer
   if (text.startsWith("/transferowner") && isOwner) {
     const target = text.split(" ")[1];
     if (target && /^\d+$/.test(target)) {
       PRIMARY_OWNER_ID = target.trim();
       ADMINS.add(target.trim());
-      await callTelegram("sendMessage", {
-        chat_id: chatId,
-        text: `👑 Master Owner set to: \`${target}\``,
-        parse_mode: "Markdown"
-      });
+      await callTelegram("sendMessage", { chat_id: chatId, text: `👑 Owner set to: \`${target}\``, parse_mode: "Markdown" });
     }
     return;
   }
 
-  // Add Admin
   if (text.startsWith("/addadmin") && isOwner) {
     const target = text.split(" ")[1];
     if (target && /^\d+$/.test(target)) {
       ADMINS.add(target.trim());
-      await callTelegram("sendMessage", {
-        chat_id: chatId,
-        text: `✅ Admin added: \`${target}\``,
-        parse_mode: "Markdown"
-      });
+      await callTelegram("sendMessage", { chat_id: chatId, text: `✅ Admin added: \`${target}\``, parse_mode: "Markdown" });
     }
     return;
   }
 
-  // Admin Watch Specific Address
   if (text.startsWith("/watch") && isAdmin) {
-    const targetEmail = text.split(" ")[1];
-    if (targetEmail && targetEmail.includes("@")) {
-      ADMIN_WATCHED_EMAILS.set(targetEmail.toLowerCase().trim(), chatId);
-      await callTelegram("sendMessage", {
-        chat_id: chatId,
-        text: `🎯 Listening to: \`${targetEmail.toLowerCase().trim()}\``,
-        parse_mode: "Markdown"
-      });
+    const target = text.split(" ")[1];
+    if (target && target.includes("@")) {
+      ADMIN_WATCHED_EMAILS.set(target.toLowerCase().trim(), chatId);
+      await callTelegram("sendMessage", { chat_id: chatId, text: `🎯 Watching: \`${target.toLowerCase().trim()}\``, parse_mode: "Markdown" });
     }
     return;
   }
 
-  // Instant Email on /start or /gen
+  // Classic Temp Mail Screen on /start or /gen
   if (text === "/start" || text === "/gen") {
-    await deliverEmailInterface(chatId, false, null, isAdmin);
+    await renderTempMailDashboard(chatId, false, null, isAdmin);
   } else if (text === "/id") {
-    await callTelegram("sendMessage", {
-      chat_id: chatId,
-      text: `Your Telegram ID: \`${chatId}\``,
-      parse_mode: "Markdown"
-    });
+    await callTelegram("sendMessage", { chat_id: chatId, text: `Your ID: \`${chatId}\``, parse_mode: "Markdown" });
   }
 }
 
-// --- INLINE CALLBACK LOGIC ---
-
+// Callback Engine (Buttons)
 async function handleCallback(query) {
   const chatId = query.message.chat.id.toString();
   const messageId = query.message.message_id;
@@ -254,42 +200,60 @@ async function handleCallback(query) {
 
   await callTelegram("answerCallbackQuery", { callback_query_id: query.id });
 
-  if (data === "action_next") {
-    await deliverEmailInterface(chatId, true, messageId, isAdmin);
-  } else if (data === "admin_old_mails" && isAdmin) {
-    const panel = 
-      `🔑 *Old & Root Mailbox Hub*\n\n` +
-      `System addresses ke verification codes admins ko real-time broadcast hote hain.\n\n` +
-      `Specific address monitor karne ke liye:\n` +
+  if (data === "action_change") {
+    await renderTempMailDashboard(chatId, true, messageId, isAdmin);
+  } 
+  else if (data === "action_refresh") {
+    await callTelegram("answerCallbackQuery", { 
+      callback_query_id: query.id, 
+      text: "Inbox checked. No new mail!", 
+      show_alert: false 
+    });
+  } 
+  else if (data === "action_delete") {
+    await renderTempMailDashboard(chatId, true, messageId, isAdmin);
+  }
+  else if (data === "admin_hub" && isAdmin) {
+    const hubText = 
+      `🔐 *Old & Root Mailbox Hub*\n\n` +
+      `System emails ke verification codes yahan auto receive hote hain.\n\n` +
+      `Specific mail monitor command:\n` +
       `\`/watch name@${DOMAIN}\``;
 
-    const btns = [[{ text: "🔙 Back", callback_data: "action_next" }]];
-
+    const btns = [[{ text: "🔙 Back", callback_data: "action_change" }]];
     await callTelegram("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
-      text: panel,
+      text: hubText,
       parse_mode: "Markdown",
       reply_markup: { inline_keyboard: btns }
     });
   }
 }
 
-// --- UI GENERATOR ---
+// Classic Temp-Mail Dashboard Card
+async function renderTempMailDashboard(chatId, isEdit = false, messageId = null, isAdmin = false) {
+  const email = generateFemaleEmail(chatId);
 
-async function deliverEmailInterface(chatId, isEdit = false, messageId = null, isAdmin = false) {
-  const email = generateRandomFemaleEmail(chatId);
-  const text = 
-    `*Your Temporary Email:*\n\n` +
-    `\`${email}\`\n\n` +
-    `_(Tap the email to copy)_`;
+  let text = `📬 *YOUR TEMPORARY EMAIL ADDRESS*\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  text += `\`${email}\`\n\n`;
+  text += `_(Tap email to copy)_\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  text += `Status: 🟢 *Waiting for incoming mail...*`;
 
   let buttons = [
-    [{ text: "🔄 Next Email", callback_data: "action_next" }]
+    [
+      { text: "🔄 Change Email", callback_data: "action_change" },
+      { text: "📬 Refresh", callback_data: "action_refresh" }
+    ],
+    [
+      { text: "🗑 Delete", callback_data: "action_delete" }
+    ]
   ];
 
   if (isAdmin) {
-    buttons.push([{ text: "🔑 Old Email Hub", callback_data: "admin_old_mails" }]);
+    buttons.push([{ text: "🔑 Old Email Hub", callback_data: "admin_hub" }]);
   }
 
   if (isEdit && messageId) {
@@ -310,15 +274,13 @@ async function deliverEmailInterface(chatId, isEdit = false, messageId = null, i
   }
 }
 
-// --- HELPER UTILITIES ---
-
-function generateRandomFemaleEmail(chatId) {
+function generateFemaleEmail(chatId) {
   const first = FEMALE_NAMES[Math.floor(Math.random() * FEMALE_NAMES.length)];
   const last = SURNAMES[Math.floor(Math.random() * SURNAMES.length)];
   const num = Math.floor(1000 + Math.random() * 9000);
   const sep = Math.random() > 0.5 ? "." : "";
-  const identity = `${first}${sep}${last}${num}`;
-  return `${chatId}x${identity}@${DOMAIN}`;
+  const randomUser = `${first}${sep}${last}${num}`;
+  return `${chatId}x${randomUser}@${DOMAIN}`;
 }
 
 function parseEmailContent(raw) {

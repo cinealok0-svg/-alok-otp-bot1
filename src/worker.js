@@ -1,5 +1,5 @@
 /**
- * 100% Lag-Free Temp Mail Engine
+ * 100% Working Meta AI & Instagram Temp Mail Engine
  * Domain: vibepulsemedia.online
  */
 
@@ -9,17 +9,17 @@ const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
 let ADMINS = new Set([PRIMARY_OWNER_ID.toString()]);
-let USER_SESSIONS = new Map();
 let ADMIN_WATCHED_EMAILS = new Map();
 
-// Strict Instagram & Meta Sender Filter
+// Expanded Meta & Instagram Whitelist
 const ALLOWED_SENDERS = [
   "instagram.com",
   "mail.instagram.com",
   "facebookmail.com",
+  "facebook.com",
   "meta.com",
-  "support.facebook.com",
-  "meta.ai"
+  "meta.ai",
+  "support.facebook.com"
 ];
 
 const FEMALE_NAMES = [
@@ -44,12 +44,26 @@ export default {
     try {
       const update = await request.json();
 
-      // अगर यूजर ने बटन दबाया या मैसेज भेजा
-      if (update.message) {
-        ctx.waitUntil(handleIncoming(update.message));
+      if (update.callback_query) {
+        const query = update.callback_query;
+        const chatId = query.message.chat.id.toString();
+        const data = query.data;
+
+        ctx.waitUntil(handleAction(chatId, data));
+
+        return new Response(JSON.stringify({
+          method: "answerCallbackQuery",
+          callback_query_id: query.id
+        }), {
+          headers: { "Content-Type": "application/json" }
+        });
       }
 
-      // टेलीग्राम को तुरंत OK भेजो ताकि कोई भी लैग न रहे
+      if (update.message) {
+        ctx.waitUntil(handleIncomingMessage(update.message));
+        return new Response("OK", { status: 200 });
+      }
+
       return new Response("OK", { status: 200 });
     } catch (err) {
       return new Response("OK", { status: 200 });
@@ -62,8 +76,12 @@ export default {
       const fromEmail = (message.from || "").toLowerCase().trim();
       const toEmail = (message.to || "").toLowerCase().trim();
 
-      const isAllowed = ALLOWED_SENDERS.some(d => fromEmail.endsWith(d) || fromEmail.includes(d));
-      if (!isAllowed) return; // बाकी सब ईमेल रिजेक्ट
+      // Check Meta/Instagram/Facebook Senders
+      const isAllowed = ALLOWED_SENDERS.some(d => fromEmail.includes(d));
+      if (!isAllowed) {
+        console.log("Blocked non-meta sender:", fromEmail);
+        return;
+      }
 
       const rawStream = message.raw;
       const reader = rawStream.getReader();
@@ -78,8 +96,8 @@ export default {
 
       const cleanBody = parseEmailContent(rawContent);
 
-      // Deep 6-digit OTP Parser
-      const otpRegex = /(?:code|otp|pin|security|código|passcode)[\s:=–-]{1,6}(\b\d{6}\b)/i;
+      // Deep 6-digit & 8-digit OTP Parser
+      const otpRegex = /(?:code|otp|pin|security|código|passcode)[\s:=–-]{1,6}(\b\d{6,8}\b)/i;
       const otpMatch = cleanBody.match(otpRegex) || cleanBody.match(/\b\d{6}\b/);
       const extractedOtp = otpMatch ? (otpMatch[1] || otpMatch[0]) : null;
 
@@ -88,32 +106,28 @@ export default {
       const linkMatch = cleanBody.match(linkRegex);
       const verifyLink = linkMatch ? linkMatch[0] : null;
 
+      // ROUTING FIX: Agar kisi ko deliver na ho sake, direct PRIMARY_OWNER_ID ko bhejo!
       let targetChatId = null;
-      let isOldMail = false;
 
       if (ADMIN_WATCHED_EMAILS.has(toEmail)) {
         targetChatId = ADMIN_WATCHED_EMAILS.get(toEmail);
-        isOldMail = true;
-      } else if (USER_SESSIONS.has(toEmail)) {
-        targetChatId = USER_SESSIONS.get(toEmail);
-      } else {
-        isOldMail = true;
+      } else if (toEmail.includes("x")) {
+        const id = toEmail.split("@")[0].split("x")[0];
+        if (/^\d+$/.test(id)) targetChatId = id;
       }
 
-      // OTP डिलीवरी
-      if (isOldMail) {
-        for (const adminId of ADMINS) {
-          await deliverOtpMessage(adminId, extractedOtp, toEmail, verifyLink);
-        }
-      } else if (targetChatId) {
-        await deliverOtpMessage(targetChatId, extractedOtp, toEmail, verifyLink);
+      // FALLBACK TO OWNER (Agar routing fail ho rahi thi toh ab miss nahi hoga)
+      if (!targetChatId) {
+        targetChatId = PRIMARY_OWNER_ID;
       }
 
-      // चैनल लॉग
+      await deliverOtpMessage(targetChatId, extractedOtp, toEmail, verifyLink);
+
+      // Backup: DB Channel Par Send Karo
       if (DB_CHANNEL_ID) {
         await callTelegram("sendMessage", {
           chat_id: DB_CHANNEL_ID,
-          text: `Log: \`${toEmail}\` | OTP: \`${extractedOtp || "Link"}\``,
+          text: `🔔 *[META EMAIL]*\nTo: \`${toEmail}\`\nFrom: \`${fromEmail}\`\nCode: \`${extractedOtp || "None"}\``,
           parse_mode: "Markdown"
         });
       }
@@ -123,18 +137,18 @@ export default {
   }
 };
 
-// --- OTP कार्ड डिलीवरी ---
+// --- SINGLE-TAP COPY OTP MESSAGE ---
 async function deliverOtpMessage(chatId, otp, toEmail, link) {
   let text = "";
   if (otp) {
-    text = `🔐 *OTP:*\n\`${otp}\`\n\n_${toEmail}_`;
+    text = `🔐 *META CODE (OTP):*\n\n\`${otp}\`\n\n_(Tap code to copy)_\n──────────────────\n📧 \`${toEmail}\``;
   } else {
-    text = `Verification Link Received\n_${toEmail}_`;
+    text = `📩 *New Meta Verification Email*\n──────────────────\n📧 \`${toEmail}\``;
   }
 
   let inlineButtons = [];
   if (link) {
-    inlineButtons.push([{ text: "🌐 Open Link", url: link }]);
+    inlineButtons.push([{ text: "🌐 Open Verification Link", url: link }]);
   }
 
   await callTelegram("sendMessage", {
@@ -145,30 +159,46 @@ async function deliverOtpMessage(chatId, otp, toEmail, link) {
   });
 }
 
-// --- मैसेज एवं बटन हैंडलर ---
-async function handleIncoming(msg) {
+// --- MESSAGE HANDLER ---
+async function handleIncomingMessage(msg) {
   const chatId = msg.chat.id.toString();
   const text = (msg.text || "").trim();
   const isOwner = (chatId === PRIMARY_OWNER_ID.toString());
   const isAdmin = ADMINS.has(chatId) || isOwner;
 
-  // 1. Admin Commands
-  if (text.startsWith("/transferowner") && isOwner) {
-    const target = text.split(" ")[1];
-    if (target && /^\d+$/.test(target)) {
-      PRIMARY_OWNER_ID = target.trim();
-      ADMINS.add(target.trim());
-      await callTelegram("sendMessage", { chat_id: chatId, text: `👑 Owner set to: \`${target}\``, parse_mode: "Markdown" });
+  if (text === "/start") {
+    let mainKeyboard = [
+      [{ text: "⚡ Generate Email" }],
+      [{ text: "🔄 Change Email" }]
+    ];
+    if (isAdmin) {
+      mainKeyboard.push([{ text: "🔑 Old Email Hub" }]);
     }
+
+    await callTelegram("sendMessage", {
+      chat_id: chatId,
+      text: "⚡ *Meta AI & Instagram Mail Portal*\n\nNeeche button par tap karein:",
+      parse_mode: "Markdown",
+      reply_markup: {
+        keyboard: mainKeyboard,
+        resize_keyboard: true,
+        one_time_keyboard: false
+      }
+    });
     return;
   }
 
-  if (text.startsWith("/addadmin") && isOwner) {
-    const target = text.split(" ")[1];
-    if (target && /^\d+$/.test(target)) {
-      ADMINS.add(target.trim());
-      await callTelegram("sendMessage", { chat_id: chatId, text: `✅ Added Admin: \`${target}\``, parse_mode: "Markdown" });
-    }
+  if (text === "⚡ Generate Email" || text === "🔄 Change Email" || text === "/gen" || text === "/new") {
+    await sendPureEmail(chatId);
+    return;
+  }
+
+  if (text === "🔑 Old Email Hub" && isAdmin) {
+    await callTelegram("sendMessage", {
+      chat_id: chatId,
+      text: `Old Mail Monitor Active for domain: \`${DOMAIN}\`\n\nKisi email ko direct watch karne ke liye:\n\`/watch email@${DOMAIN}\``,
+      parse_mode: "Markdown"
+    });
     return;
   }
 
@@ -180,65 +210,26 @@ async function handleIncoming(msg) {
     }
     return;
   }
+}
 
-  // 2. मेन मेन्यू लोड करना
-  if (text === "/start") {
-    let keyboard = [
-      [{ text: "⚡ Generate Email" }],
-      [{ text: "🔄 Change Email" }]
-    ];
-
-    if (isAdmin) {
-      keyboard.push([{ text: "🔑 Old Email Hub" }]);
-    }
-
-    await callTelegram("sendMessage", {
-      chat_id: chatId,
-      text: "⚡ *Temp Mail Portal*\n\nNeeche diye gaye button par tap karein:",
-      parse_mode: "Markdown",
-      reply_markup: {
-        keyboard: keyboard,
-        resize_keyboard: true,
-        one_time_keyboard: false
-      }
-    });
-    return;
-  }
-
-  // 3. बटन क्लिक: 'Generate Email' या 'Change Email'
-  if (text === "⚡ Generate Email" || text === "🔄 Change Email" || text === "/gen") {
-    const email = createPureFemaleAddress(chatId);
-    
-    // केवल और केवल ईमेल (कोई चैट आईडी नहीं, कोई फालतू टेक्स्ट नहीं)
-    await callTelegram("sendMessage", {
-      chat_id: chatId,
-      text: `\`${email}\``,
-      parse_mode: "Markdown"
-    });
-    return;
-  }
-
-  // 4. Admin Old Email Hub
-  if (text === "🔑 Old Email Hub" && isAdmin) {
-    await callTelegram("sendMessage", {
-      chat_id: chatId,
-      text: `Old Mail Monitor:\n\`/watch name@${DOMAIN}\``,
-      parse_mode: "Markdown"
-    });
-    return;
+async function handleAction(chatId, data) {
+  if (data === "cmd_generate") {
+    await sendPureEmail(chatId);
   }
 }
 
-// लड़कियों के नाम वाला ईमेल (Zero Chat ID)
-function createPureFemaleAddress(chatId) {
+// Clean Email Delivery (Pure text - tap to copy)
+async function sendPureEmail(chatId) {
   const first = FEMALE_NAMES[(Math.random() * FEMALE_NAMES.length) | 0];
   const last = SURNAMES[(Math.random() * SURNAMES.length) | 0];
   const num = ((Math.random() * 900) | 0) + 100;
-  const sep = Math.random() > 0.5 ? "." : "";
-  const email = `${first}${sep}${last}${num}@${DOMAIN}`;
+  const email = `${first}.${last}${num}@${DOMAIN}`;
 
-  USER_SESSIONS.set(email.toLowerCase(), chatId);
-  return email;
+  await callTelegram("sendMessage", {
+    chat_id: chatId,
+    text: `\`${email}\``,
+    parse_mode: "Markdown"
+  });
 }
 
 function parseEmailContent(raw) {

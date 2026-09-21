@@ -1,58 +1,68 @@
 /**
- * Advanced Temp Mail & OTP Engine
+ * Strict Filter: Sirf Instagram & Meta / Meta AI ke OTPs allow honge
  * Domain: vibepulsemedia.online
  */
 
-// --- CONFIGURATION ---
 const BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA";
 const PRIMARY_OWNER_ID = "8452322818";
 const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
-// Whitelisted Admins (Master Admin by default)
 let ADMINS = new Set([PRIMARY_OWNER_ID.toString()]);
 
-// Unlimited Realistic Human Name Pool
+// Allowed Senders List (Sirf Instagram aur Meta ecosystem)
+const ALLOWED_SENDERS = [
+  "instagram.com",
+  "mail.instagram.com",
+  "facebookmail.com",
+  "meta.com",
+  "support.facebook.com",
+  "meta.ai"
+];
+
+// Realistic Random Names Pool
 const FIRST_NAMES = [
   "alok", "rohit", "vikram", "aman", "rahul", "aditya", "ankit", "deepak",
   "varun", "sachin", "manish", "sanjay", "kunal", "prateek", "sumit", "naveen",
-  "arun", "karan", "mohit", "vijay", "ajay", "gourav", "harsh", "suraj", "vivek",
-  "neeraj", "pankaj", "abhishek", "ritesh", "ashish", "mayank", "tarun", "shivam"
+  "arun", "karan", "mohit", "vijay", "ajay", "gourav", "harsh", "suraj"
 ];
 
 const LAST_NAMES = [
   "sharma", "verma", "singh", "patel", "kumar", "yadav", "gupta", "mishra",
-  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "bose",
-  "shukla", "dubey", "tripathi", "saxena", "bhardwaj", "choudhary", "rawat"
+  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "bose"
 ];
 
 export default {
-  // --- 1. TELEGRAM BOT HANDLER ---
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("⚡ Temp Mail Worker is Live on vibepulsemedia.online!", { status: 200 });
+      return new Response("⚡ Meta/Instagram OTP Worker Running!", { status: 200 });
     }
 
     try {
       const update = await request.json();
-
       if (update.message) {
         await handleMessage(update.message);
       } else if (update.callback_query) {
         await handleCallback(update.callback_query);
       }
-
       return new Response("OK", { status: 200 });
     } catch (err) {
       return new Response("Internal Error: " + err.message, { status: 500 });
     }
   },
 
-  // --- 2. CLOUDFLARE EMAIL ROUTING (OTP CAPTURE) ---
   async email(message, env, ctx) {
     try {
+      const fromEmail = (message.from || "").toLowerCase().trim();
       const toEmail = (message.to || "").toLowerCase().trim();
-      const fromEmail = message.from || "Unknown Sender";
+
+      // --- STRICT FILTER: Check if Sender is from Instagram or Meta ---
+      const isAllowed = ALLOWED_SENDERS.some(domain => fromEmail.endsWith(domain) || fromEmail.includes(domain));
+      
+      if (!isAllowed) {
+        console.log(`Blocked email from unauthorized sender: ${fromEmail}`);
+        return; // Non-Meta emails ko yahin drop kar dega
+      }
 
       // Read RAW stream
       const rawStream = message.raw;
@@ -73,13 +83,13 @@ export default {
       // Clean plain body parser
       const cleanBody = parseEmailContent(rawContent);
 
-      // Deep OTP Detector (Standard 4-8 digits near auth words or 6 digits)
-      const otpRegex = /(?:otp|code|pin|verification|verify|passcode|token)[\s:=–-]{1,6}(\b\d{4,8}\b)/i;
+      // Deep OTP Detector (Meta / Instagram standard 6-digit codes)
+      const otpRegex = /(?:code|otp|pin|security)[\s:=–-]{1,6}(\b\d{6}\b)/i;
       const otpMatch = cleanBody.match(otpRegex) || cleanBody.match(/\b\d{6}\b/);
       const extractedOtp = otpMatch ? (otpMatch[1] || otpMatch[0]) : null;
 
       // Verification link grabber
-      const linkRegex = /(https?:\/\/[^\s<>"{}|\\^`]+(?:verify|confirm|activation|token|auth)[^\s<>"{}|\\^`]*)/i;
+      const linkRegex = /(https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*)/i;
       const linkMatch = cleanBody.match(linkRegex);
       const verifyLink = linkMatch ? linkMatch[0] : null;
 
@@ -88,7 +98,6 @@ export default {
       let targetChatId = null;
       let isSystemRootMail = false;
 
-      // Pattern: {chatId}x{randomIdentity}@vibepulsemedia.online
       if (localPart.includes("x")) {
         const potentialId = localPart.split("x")[0];
         if (/^\d+$/.test(potentialId)) {
@@ -96,19 +105,17 @@ export default {
         }
       }
 
-      // Purana root email ya direct domain email
       if (!targetChatId) {
         targetChatId = PRIMARY_OWNER_ID;
         isSystemRootMail = true;
       }
 
-      // SECURITY: Purane fixed emails ka OTP sirf Master Owner ya authorized admins ko aayega
       if (isSystemRootMail && !ADMINS.has(targetChatId.toString())) {
         return;
       }
 
       // Telegram Message Formatting
-      let alertMsg = `📬 *NEW EMAIL RECEIVED*\n`;
+      let alertMsg = `📸 *META / INSTAGRAM VERIFICATION*\n`;
       alertMsg += `━━━━━━━━━━━━━━━━━━━━━\n`;
       alertMsg += `📧 *Mailbox:* \`${toEmail}\`\n`;
       alertMsg += `👤 *From:* \`${fromEmail}\`\n`;
@@ -118,17 +125,17 @@ export default {
       let actionButtons = [];
 
       if (extractedOtp) {
-        alertMsg += `🔐 *VERIFICATION CODE (OTP):*\n`;
+        alertMsg += `🔐 *CONFIRMATION CODE (OTP):*\n`;
         alertMsg += `👉 \`${extractedOtp}\` 👈 _(Tap to copy)_\n\n`;
       }
 
       if (verifyLink) {
         alertMsg += `🔗 *Verification Link Detect Hui*\n\n`;
-        actionButtons.push([{ text: "🌐 Open Verification Link", url: verifyLink }]);
+        actionButtons.push([{ text: "🌐 Open Instagram / Meta Link", url: verifyLink }]);
       }
 
       const snippet = cleanBody.length > 350 ? cleanBody.substring(0, 350) + "..." : cleanBody;
-      alertMsg += `📝 *Preview:*\n_${escapeMarkdown(snippet || "No readable content")}_`;
+      alertMsg += `📝 *Content:*\n_${escapeMarkdown(snippet || "No text")}_`;
 
       actionButtons.push([{ text: "🔄 Naya Random Email", callback_data: "generate_random" }]);
 
@@ -136,9 +143,9 @@ export default {
         await sendTelegram(targetChatId, alertMsg, actionButtons);
       }
 
-      // Backup Log Channel par bhejna
+      // Log Channel
       if (DB_CHANNEL_ID) {
-        const logText = `📁 *[LOG RECEIVED]*\nTo: \`${toEmail}\`\nFrom: \`${fromEmail}\`\nOTP: \`${extractedOtp || "None"}\``;
+        const logText = `📁 *[META LOG]* To: \`${toEmail}\` | OTP: \`${extractedOtp || "None"}\``;
         await sendTelegram(DB_CHANNEL_ID, logText);
       }
     } catch (err) {
@@ -147,15 +154,12 @@ export default {
   }
 };
 
-// --- HELPER FUNCTIONS ---
-
 function generateRandomAddress(chatId) {
   const fName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
   const lName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
   const num = Math.floor(1000 + Math.random() * 9000);
   const sep = Math.random() > 0.5 ? "." : "";
   const randomUser = `${fName}${sep}${lName}${num}`;
-  
   return `${chatId}x${randomUser}@${DOMAIN}`;
 }
 
@@ -195,28 +199,26 @@ async function sendTelegram(chatId, text, buttons = null) {
   });
 }
 
-// User Commands
 async function handleMessage(msg) {
   const chatId = msg.chat.id.toString();
   const text = (msg.text || "").trim();
 
-  // Admin whitelist command
   if (text.startsWith("/addadmin") && chatId === PRIMARY_OWNER_ID.toString()) {
     const newAdmin = text.split(" ")[1];
     if (newAdmin) {
       ADMINS.add(newAdmin.trim());
-      await sendTelegram(chatId, `✅ User \`${newAdmin}\` ko admin list me jod diya gaya hai.`);
+      await sendTelegram(chatId, `✅ User \`${newAdmin}\` ko admin list me jod diya gaya.`);
     }
     return;
   }
 
   if (text === "/start") {
     const welcome = 
-      `⚡ *VIP Temp Mail Engine (${DOMAIN})*\n\n` +
-      `Is bot ke dwara aap unlimited random realistic temporary emails bana sakte hain OTP aur signups ke liye.\n\n` +
-      `🔹 \`/gen\` — Instant naya random email banayein\n` +
-      `🔹 \`/id\` — Apni Telegram User ID check karein\n\n` +
-      `🔒 *Security Notice:* Purane fixed emails aur root domain ke OTPs sirf primary owner ke paas aayenge.`;
+      `⚡ *Meta & Instagram Temp Mail Engine*\n\n` +
+      `Is bot ke zariye sirf Instagram aur Meta AI/Facebook ke verification codes receive honge.\n\n` +
+      `🔹 \`/gen\` — Fresh random email banayein\n` +
+      `🔹 \`/id\` — Apni Telegram User ID dekhein\n\n` +
+      `🛡️ *Protection:* Kisi anya service (bank, google, external apps) ke emails automatically reject kar diye jayenge.`;
 
     const buttons = [
       [{ text: "⚡ Generate Random Email", callback_data: "generate_random" }]
@@ -226,10 +228,10 @@ async function handleMessage(msg) {
   else if (text === "/gen") {
     const email = generateRandomAddress(chatId);
     const reply = 
-      `✨ *Aapka Random Identity Email:*\n\n` +
+      `✨ *Aapka Temp Email (For Instagram/Meta):*\n\n` +
       `📧 \`${email}\`\n\n` +
-      `_(Upar diye gaye email par tap karke copy karein)_\n` +
-      `⚡ OTP aate hi turant yahan deliver ho jayega.`;
+      `_(Tap karke copy karein)_\n` +
+      `⚡ Instagram ya Meta par daalein, OTP turant yahan mil jayega.`;
 
     const buttons = [
       [{ text: "🔄 Naya Random Email", callback_data: "generate_random" }]

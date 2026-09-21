@@ -2,3 +2,7 @@ name = "alok-otp-bot1"
 main = "src/worker.js"
 compatibility_date = "2024-09-01"
 compatibility_flags = [ "nodejs_compat" ]
+
+# Agar aapko Cloudflare par logs check karne hain
+[observability]
+enabled = true

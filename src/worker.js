@@ -1,7 +1,7 @@
 /**
- * Ultimate Meta & Instagram Mail Engine
+ * Professional Meta AI & Instagram Temp Mail Engine (Fixed & Isolated)
  * Domain: vibepulsemedia.online
- * Features: Hardware-level Cache Deduplication, Auto Old Email Reader, Tap-to-Copy
+ * Fixes: 1-Time Clean Delivery, Anti-Duplicate Lock, Dedicated Old Email Hub
  */
 
 const BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA";
@@ -9,11 +9,13 @@ const PRIMARY_OWNER_ID = "8452322818";
 const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
-// In-Memory Storage
+// In-Memory Global Registries
 let ADMINS = new Set([PRIMARY_OWNER_ID]);
-let USER_ACTIVE_EMAIL = new Map(); // chatId -> current active email
-let EMAIL_OWNER = new Map();        // email -> chatId
-let EMAIL_HISTORY = new Map();      // email -> { otp, link, time }
+let USER_LAST_EMAIL = new Map();  // chatId -> current active email
+let EMAIL_TO_USER = new Map();    // email -> chatId (Dedicated Ownership)
+let EMAIL_INBOX = new Map();      // email -> { otp, link, receivedAt, delivered: bool }
+let USER_STATE = new Map();       // chatId -> current state
+let PROCESSED_LOCK = new Map();   // deduplication hash -> timestamp
 
 const FEMALE_NAMES = [
   "priya", "ananya", "sneha", "pooja", "neha", "riya", "simran", "kajal",
@@ -28,14 +30,14 @@ const SURNAMES = [
 ];
 
 export default {
-  // --- 1. TELEGRAM INTERACTIONS ---
+  // --- 1. TELEGRAM WEBHOOK HANDLER ---
   async fetch(request, env, ctx) {
     if (request.method !== "POST") return new Response("OK", { status: 200 });
 
     try {
       const update = await request.json();
 
-      // Inline Callback Buttons
+      // Handle Callback Buttons
       if (update.callback_query) {
         const q = update.callback_query;
         const chatId = q.message.chat.id.toString();
@@ -45,6 +47,8 @@ export default {
           await generateNewEmail(chatId);
         } else if (data === "btn_check_otp") {
           await checkCurrentOtp(chatId);
+        } else if (data === "btn_old_hub") {
+          await handleOldHubPrompt(chatId);
         }
 
         return new Response(JSON.stringify({
@@ -55,13 +59,13 @@ export default {
         });
       }
 
-      // Chat Messages & Commands
+      // Handle Messages & Commands
       if (update.message) {
         const msg = update.message;
         const chatId = msg.chat.id.toString();
         const text = (msg.text || "").trim();
 
-        // Admin Management Commands
+        // Admin Management: Add Admin
         if (text.startsWith("/addadmin")) {
           if (chatId !== PRIMARY_OWNER_ID) {
             await sendMsg(chatId, "⛔ Sirf Main Owner hi Admin add kar sakta hai.");
@@ -70,11 +74,14 @@ export default {
           const parts = text.split(" ");
           if (parts[1]) {
             ADMINS.add(parts[1].trim());
-            await sendMsg(chatId, `✅ Chat ID \`${parts[1].trim()}\` ko Admin banaya gaya.`);
+            await sendMsg(chatId, `✅ Chat ID \`${parts[1].trim()}\` ko Admin bana diya gaya.`);
+          } else {
+            await sendMsg(chatId, "Usage: `/addadmin <chat_id>`");
           }
           return new Response("OK");
         }
 
+        // Admin Management: Remove Admin
         if (text.startsWith("/deladmin")) {
           if (chatId !== PRIMARY_OWNER_ID) {
             await sendMsg(chatId, "⛔ Sirf Main Owner hi Admin hata sakta hai.");
@@ -83,35 +90,56 @@ export default {
           const parts = text.split(" ");
           if (parts[1] && parts[1].trim() !== PRIMARY_OWNER_ID) {
             ADMINS.delete(parts[1].trim());
-            await sendMsg(chatId, `❌ Admin ID \`${parts[1].trim()}\` ko hata diya.`);
+            await sendMsg(chatId, `❌ Admin ID \`${parts[1].trim()}\` ko hata diya gaya.`);
           }
           return new Response("OK");
         }
 
-        // Standard Commands
+        // Admin List
+        if (text === "/adminlist") {
+          if (!ADMINS.has(chatId)) {
+            await sendMsg(chatId, "⛔ Sirf Admins list dekh sakte hain.");
+            return new Response("OK");
+          }
+          let list = Array.from(ADMINS).map(id => `• \`${id}\``).join("\n");
+          await sendMsg(chatId, `👑 *Authorized Admins:*\n\n${list}`);
+          return new Response("OK");
+        }
+
+        // Input Listener for Old Email Submission
+        if (USER_STATE.get(chatId) === "awaiting_old_email") {
+          USER_STATE.delete(chatId);
+          await linkAndCheckOldEmail(chatId, text);
+          return new Response("OK");
+        }
+
+        // Main Start Menu
         if (text === "/start") {
+          USER_STATE.delete(chatId);
           const keyboard = [
             [{ text: "⚡ Generate Email" }, { text: "📬 Check OTP" }],
             [{ text: "🔄 Change Email" }, { text: "🔑 Old Email Hub" }]
           ];
 
           await sendMsg(chatId, 
-            "👋 *Meta AI & Instagram Mail Engine*\n\nNeeche buttons ka use karein ya kisi bhi puraane email ko chat me paste karein uska OTP dekhne ke liye:", 
+            "👋 *Instagram & Meta Temp Mail Hub*\n\nNaya email create karne ya purane email ka OTP track karne ke liye button chunein:", 
             { keyboard: keyboard, resize_keyboard: true }
           );
         } 
         else if (text === "⚡ Generate Email" || text === "🔄 Change Email" || text === "/gen") {
+          USER_STATE.delete(chatId);
           await generateNewEmail(chatId);
         } 
         else if (text === "📬 Check OTP" || text === "/otp") {
+          USER_STATE.delete(chatId);
           await checkCurrentOtp(chatId);
         }
-        else if (text === "🔑 Old Email Hub") {
-          await sendMsg(chatId, "🔑 *Old Email OTP Hub*\n\nApna purana email address yahan chat me paste karein:\n\n`swati.sharma712@vibepulsemedia.online`");
+        else if (text === "🔑 Old Email Hub" || text === "/old") {
+          await handleOldHubPrompt(chatId);
         }
-        // Direct Old Email Query: User directly pastes any email
         else if (text.includes(`@${DOMAIN}`)) {
-          await fetchOldEmailOtp(chatId, text);
+          // Agar direct email paste kiya chat me
+          await linkAndCheckOldEmail(chatId, text);
         }
 
         return new Response("OK", { status: 200 });
@@ -123,184 +151,204 @@ export default {
     }
   },
 
-  // --- 2. EMAIL ROUTING (ANTI-SPAM DEDUPLICATION) ---
+  // --- 2. CLOUDFLARE EMAIL ROUTING RECEIVER ---
   async email(message, env, ctx) {
     try {
-      const fromEmail = (message.from || "").toLowerCase().trim();
-      const toEmail = (message.to || "").toLowerCase().trim();
+      const rawFrom = (message.from || "").toLowerCase();
+      // Sanitize exact recipient email (removes quotes/brackets)
+      const rawTo = message.to || "";
+      const emailMatch = rawTo.match(/[\w.+%-]+@[\w.-]+\.[a-zA-Z]{2,}/);
+      const toEmail = (emailMatch ? emailMatch[0] : rawTo).toLowerCase().trim();
 
-      // Filter: Only Meta / Instagram / Facebook
-      const isMeta = fromEmail.includes("meta") || 
-                     fromEmail.includes("facebook") || 
-                     fromEmail.includes("instagram");
+      // Filter: Meta, Facebook, Instagram only
+      const isMeta = rawFrom.includes("meta") || 
+                     rawFrom.includes("facebook") || 
+                     rawFrom.includes("instagram");
+
       if (!isMeta) return;
 
       const raw = await new Response(message.raw).text();
 
-      // Extract 6-8 digit OTP
-      const otpMatch = raw.match(/(?:code|otp|pin|security|código|passcode)[\s:=–-]{1,6}(\b\d{6,8}\b)/i) || 
+      // Extract 6 to 8 digit OTP strictly
+      const otpMatch = raw.match(/(?:code|otp|pin|passcode|código)[\s:=–-]{1,8}(\b\d{6,8}\b)/i) || 
                        raw.match(/\b\d{6}\b/);
       const extractedOtp = otpMatch ? (otpMatch[1] || otpMatch[0]) : null;
 
-      // Extract Verification Link
+      // Extract Verification Link if available
       const linkMatch = raw.match(/https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*/i);
       const verifyLink = linkMatch ? linkMatch[0] : null;
 
-      if (!extractedOtp && !verifyLink) return;
-
-      // 🛡️ HARDWARE CACHE LOCK (Stops exact duplicate delivery across Cloudflare edges)
-      const dedupeKey = `email_lock_${toEmail}_${extractedOtp || "LINK"}`;
-      const cache = caches.default;
-      const cacheUrl = new Request(`https://cache.local/${encodeURIComponent(dedupeKey)}`);
+      // --- STRICT DEDUPLICATION SHIELD (Prevents 2-3x duplicate delivery) ---
+      const dedupeKey = `${toEmail}_${extractedOtp || "LINK"}`;
+      const now = Date.now();
       
-      const alreadySent = await cache.match(cacheUrl);
-      if (alreadySent) {
-        return; // Exact duplicate email detected, drop silently
+      if (PROCESSED_LOCK.has(dedupeKey)) {
+        const lastSent = PROCESSED_LOCK.get(dedupeKey);
+        if (now - lastSent < 300000) { // 5 minutes duplicate lock
+          return;
+        }
+      }
+      PROCESSED_LOCK.set(dedupeKey, now);
+
+      // Clean old lock memory periodically
+      if (PROCESSED_LOCK.size > 2000) {
+        for (const [key, ts] of PROCESSED_LOCK.entries()) {
+          if (now - ts > 300000) PROCESSED_LOCK.delete(key);
+        }
       }
 
-      // Save lock for 180 seconds (3 Minutes)
-      await cache.put(cacheUrl, new Response("1", {
-        headers: { "Cache-Control": "public, max-age=180" }
-      }));
-
-      // Store in History Map for Old Email Hub
-      EMAIL_HISTORY.set(toEmail, {
+      // Store in Memory Inbox
+      EMAIL_INBOX.set(toEmail, {
         otp: extractedOtp,
         link: verifyLink,
-        time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })
+        receivedAt: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }),
+        delivered: true
       });
 
-      // Find user who currently holds this email
-      let targetChatId = EMAIL_OWNER.get(toEmail);
-      if (!targetChatId) {
-        targetChatId = PRIMARY_OWNER_ID;
-      }
+      // Find bound user (Isolated Routing)
+      const boundUser = EMAIL_TO_USER.get(toEmail);
+      const targetChatId = boundUser || PRIMARY_OWNER_ID;
 
-      // Send 1 single clean box
+      // Deliver ONLY 1 time directly to user
       await deliverOtpBox(targetChatId, extractedOtp, toEmail, verifyLink);
 
-      // Send log to DB Channel
+      // Log to private DB Channel (Silent, does not disturb user)
       if (DB_CHANNEL_ID) {
-        await sendMsg(DB_CHANNEL_ID, `🔔 *[LOG]*\nEmail: \`${toEmail}\`\nOTP: \`${extractedOtp || "Link"}\``);
+        await sendMsg(
+          DB_CHANNEL_ID, 
+          `🔔 *[LOG]*\nRecipient: \`${toEmail}\`\nUser ID: \`${targetChatId}\`\nOTP: \`${extractedOtp || "Link Only"}\``
+        );
       }
     } catch (err) {
-      console.error("Email processing error:", err);
+      console.error("Email Error:", err);
     }
   }
 };
 
-// --- EMAIL GENERATOR ---
+// --- HELPER: GENERATE NEW EMAIL ---
 async function generateNewEmail(chatId) {
   const first = FEMALE_NAMES[(Math.random() * FEMALE_NAMES.length) | 0];
   const last = SURNAMES[(Math.random() * SURNAMES.length) | 0];
   const num = ((Math.random() * 900) | 0) + 100;
   const newEmail = `${first}.${last}${num}@${DOMAIN}`.toLowerCase();
 
-  // Set new active email
-  USER_ACTIVE_EMAIL.set(chatId, newEmail);
-  EMAIL_OWNER.set(newEmail, chatId);
+  // Bind session exclusively
+  USER_LAST_EMAIL.set(chatId, newEmail);
+  EMAIL_TO_USER.set(newEmail, chatId);
 
-  const text = 
-`✨ *Naya Temp Email Generate Hua:*
+  const messageText = 
+`✨ *Aapka Temp Email Taiyar Hai:*
 
 \`${newEmail}\`
 
-_(Upar email par tap karein, copy ho jayega)_
+_(Tap karke copy karein)_
 ━━━━━━━━━━━━━━━━━━━━
-Ise Instagram me dalein. OTP aane par niche *Check OTP* dabayein.`;
+Yeh email Instagram / Meta me dalein. OTP aate hi yahan **turant ek bar** bhej diya jayega.`;
 
   const inlineBtns = [
     [{ text: "📬 Check OTP", callback_data: "btn_check_otp" }],
     [{ text: "🔄 Naya Email Banayein", callback_data: "btn_gen" }]
   ];
 
-  await sendMsg(chatId, text, null, { inline_keyboard: inlineBtns });
+  await sendMsg(chatId, messageText, null, { inline_keyboard: inlineBtns });
 }
 
-// --- CHECK OTP FOR CURRENT EMAIL ---
+// --- HELPER: CHECK OTP MANUAL REFRESH ---
 async function checkCurrentOtp(chatId) {
-  const currentEmail = USER_ACTIVE_EMAIL.get(chatId);
+  const currentEmail = USER_LAST_EMAIL.get(chatId);
 
   if (!currentEmail) {
-    await sendMsg(chatId, "⚠️ Pehle ek naya email banayein: *⚡ Generate Email*");
+    await sendMsg(chatId, "⚠️ Pehle ek email banayein ya purana email link karein.");
     return;
   }
 
-  const record = EMAIL_HISTORY.get(currentEmail);
+  const record = EMAIL_INBOX.get(currentEmail);
 
-  if (record && record.otp) {
+  if (record && (record.otp || record.link)) {
     await deliverOtpBox(chatId, record.otp, currentEmail, record.link);
   } else {
     await sendMsg(
       chatId, 
-      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nInstagram par 'Resend Code' karein aur 5 second baad dobara *Check OTP* dabayein.`,
+      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nMeta/Instagram se OTP send karein, aate hi automatically deliver ho jayega.`,
       null,
-      { inline_keyboard: [[{ text: "🔄 Refresh / Check OTP", callback_data: "btn_check_otp" }]] }
+      { inline_keyboard: [[{ text: "🔄 Refresh Status", callback_data: "btn_check_otp" }]] }
     );
   }
 }
 
-// --- FETCH OLD EMAIL OTP ---
-async function fetchOldEmailOtp(chatId, inputEmail) {
-  const cleanEmail = inputEmail.toLowerCase().trim();
-  const record = EMAIL_HISTORY.get(cleanEmail);
+// --- HELPER: OLD EMAIL HUB PROMPT ---
+async function handleOldHubPrompt(chatId) {
+  USER_STATE.set(chatId, "awaiting_old_email");
+  await sendMsg(
+    chatId, 
+    "🔑 *Old Email Hub (Isolated Listener)*\n\nApna purana email address yahan chat me paste karein:\n\n_Example:_\n`anjali.saxena842@vibepulsemedia.online`\n\nIs email ka naya/purana OTP sirf aapke chat par aayega."
+  );
+}
 
-  if (!record || !record.otp) {
-    await sendMsg(
-      chatId, 
-      `❌ *Is Puraane Email Ka OTP Nahi Mila!*\n\nEmail: \`${cleanEmail}\`\n\nIs email par pichle 3 ghante me koi naya OTP nahi aaya hai ya Meta se deliver nahi hua.`
-    );
+// --- HELPER: LINK OLD EMAIL EXCLUSIVELY ---
+async function linkAndCheckOldEmail(chatId, inputEmail) {
+  const cleanEmail = inputEmail.toLowerCase().trim();
+
+  if (!cleanEmail.endsWith(`@${DOMAIN}`)) {
+    await sendMsg(chatId, `⚠️ Invalid Domain! Email \`@${DOMAIN}\` par khatam hona chahiye.`);
     return;
   }
 
-  const box = 
-`┏━━━━━━━━━━━━━━━━━━━━━┓
-  🔐 *OLD EMAIL RECOVERED CODE*
-┗━━━━━━━━━━━━━━━━━━━━━┛
+  // 1. User ke sath is email ko lock karein taaki OTP kisi aur ko na jaye
+  USER_LAST_EMAIL.set(chatId, cleanEmail);
+  EMAIL_TO_USER.set(cleanEmail, chatId);
 
-\`${record.otp}\`
+  const record = EMAIL_INBOX.get(cleanEmail);
 
-_(Tap code to copy)_
-─────────────────────
-📧 *Email:* \`${cleanEmail}\`
-⏰ *Delivered:* ${record.time}`;
-
-  let inlineBtns = [];
-  if (record.link) inlineBtns.push([{ text: "🌐 Open Link", url: record.link }]);
-  inlineBtns.push([{ text: "⚡ Generate Fresh Email", callback_data: "btn_gen" }]);
-
-  await sendMsg(chatId, box, null, { inline_keyboard: inlineBtns });
+  // Agar pehle se koi OTP inbox me moujood hai
+  if (record && (record.otp || record.link)) {
+    await sendMsg(chatId, `✅ *Email Successfully Linked!*\n\nPurana OTP mil gaya hai:`);
+    await deliverOtpBox(chatId, record.otp, cleanEmail, record.link);
+  } else {
+    // Agar OTP abhi tak nahi aaya hai toh listener activate kar de
+    await sendMsg(
+      chatId, 
+      `✅ *Email Successfully Linked!*\n\nTarget Email: \`${cleanEmail}\`\n\n📡 *Active Status:* Is email par jaise hi Meta/Instagram se naya OTP aayega, direct aapko receive hoga.\n\nAap abhi Instagram me 'Resend OTP' kar sakte hain.`,
+      null,
+      { inline_keyboard: [[{ text: "📬 Check OTP Now", callback_data: "btn_check_otp" }]] }
+    );
+  }
 }
 
-// --- SINGLE BOX DELIVERER ---
+// --- HELPER: CLEAN 1-TAP TO COPY OTP CARD ---
 async function deliverOtpBox(chatId, otp, toEmail, link) {
   let text = "";
   if (otp) {
     text = 
 `┏━━━━━━━━━━━━━━━━━━━━━┓
-  🔐 *META CODE (OTP):*
+  🔐 *META VERIFICATION OTP*
 ┗━━━━━━━━━━━━━━━━━━━━━┛
 
 \`${otp}\`
 
 _(Tap code to copy)_
 ─────────────────────
-📧 \`${toEmail}\``;
+📧 *Email:* \`${toEmail}\``;
   } else {
     text = 
 `📩 *Verification Link Received:*
 ─────────────────────
-📧 \`${toEmail}\``;
+📧 *Email:* \`${toEmail}\``;
   }
 
   let inlineBtns = [];
-  if (link) inlineBtns.push([{ text: "🌐 Open Link", url: link }]);
-  inlineBtns.push([{ text: "⚡ Generate Email", callback_data: "btn_gen" }]);
+  if (link) {
+    inlineBtns.push([{ text: "🌐 Open Verification Link", url: link }]);
+  }
+  inlineBtns.push([
+    { text: "⚡ Generate New", callback_data: "btn_gen" },
+    { text: "🔑 Link Old Email", callback_data: "btn_old_hub" }
+  ]);
 
   await sendMsg(chatId, text, null, { inline_keyboard: inlineBtns });
 }
 
-// --- TELEGRAM CALLER ---
+// --- TELEGRAM CALLER WRAPPER ---
 async function sendMsg(chatId, text, replyKeyboard = null, inlineKeyboard = null) {
   const payload = {
     chat_id: chatId,

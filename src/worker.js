@@ -1,253 +1,271 @@
 /**
- * 100% Working Meta AI & Instagram Temp Mail Engine
+ * Professional Meta AI & Instagram Temp Mail Engine
  * Domain: vibepulsemedia.online
  */
 
 const BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA";
-let PRIMARY_OWNER_ID = "8452322818";
+const PRIMARY_OWNER_ID = "8452322818";
 const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
-let ADMINS = new Set([PRIMARY_OWNER_ID.toString()]);
-let ADMIN_WATCHED_EMAILS = new Map();
-
-// Expanded Meta & Instagram Whitelist
-const ALLOWED_SENDERS = [
-  "instagram.com",
-  "mail.instagram.com",
-  "facebookmail.com",
-  "facebook.com",
-  "meta.com",
-  "meta.ai",
-  "support.facebook.com"
-];
+// State Management
+let USER_LAST_EMAIL = new Map();  // chatId -> email
+let EMAIL_TO_USER = new Map();    // email -> chatId
+let RECENT_DELIVERIES = new Map();// deduplication: `${email}_${otp}` -> timestamp
+let EMAIL_INBOX = new Map();      // email -> { otp, link, receivedAt }
 
 const FEMALE_NAMES = [
   "priya", "ananya", "sneha", "pooja", "neha", "riya", "simran", "kajal",
   "khushi", "aditi", "shreya", "tanvi", "mansi", "divya", "muskan", "aarushi",
   "ishika", "sakshi", "pallavi", "swati", "anjali", "kriti", "megha", "komal",
-  "sonam", "preeti", "jyoti", "rekha", "payal", "varsha", "shikha", "nisha",
-  "tanya", "deepika", "radhika", "monika", "garima", "ekta", "kavita", "saloni"
+  "sonam", "preeti", "jyoti", "rekha", "payal", "varsha", "shikha", "nisha"
 ];
 
 const SURNAMES = [
   "sharma", "verma", "singh", "patel", "kumar", "yadav", "gupta", "mishra",
-  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "dubey",
-  "sen", "bose", "roy", "nair", "reddy", "kashyap", "bhardwaj", "saxena"
+  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "dubey", "reddy", "bose", "saxena"
 ];
 
 export default {
-  // --- 1. WEBHOOK DISPATCHER ---
+  // --- 1. TELEGRAM INTERACTION ---
   async fetch(request, env, ctx) {
     if (request.method !== "POST") return new Response("OK", { status: 200 });
 
     try {
       const update = await request.json();
 
+      // Inline Buttons
       if (update.callback_query) {
-        const query = update.callback_query;
-        const chatId = query.message.chat.id.toString();
-        const data = query.data;
+        const q = update.callback_query;
+        const chatId = q.message.chat.id.toString();
+        const data = q.data;
 
-        ctx.waitUntil(handleAction(chatId, data));
+        if (data === "btn_gen") {
+          await generateNewEmail(chatId);
+        } else if (data === "btn_check_otp") {
+          await checkCurrentOtp(chatId);
+        }
 
         return new Response(JSON.stringify({
           method: "answerCallbackQuery",
-          callback_query_id: query.id
+          callback_query_id: q.id
         }), {
           headers: { "Content-Type": "application/json" }
         });
       }
 
+      // Keyboard Commands
       if (update.message) {
-        ctx.waitUntil(handleIncomingMessage(update.message));
+        const msg = update.message;
+        const chatId = msg.chat.id.toString();
+        const text = (msg.text || "").trim();
+
+        if (text === "/start") {
+          const keyboard = [
+            [{ text: "⚡ Generate Email" }, { text: "📬 Check OTP" }],
+            [{ text: "🔄 Change Email" }]
+          ];
+
+          await callTelegram("sendMessage", {
+            chat_id: chatId,
+            text: "👋 *Meta AI Temp Mail Service*\n\nNeeche diye gaye buttons se fresh email banayein ya OTP check karein:",
+            parse_mode: "Markdown",
+            reply_markup: {
+              keyboard: keyboard,
+              resize_keyboard: true
+            }
+          });
+        } 
+        else if (text === "⚡ Generate Email" || text === "🔄 Change Email" || text === "/gen") {
+          await generateNewEmail(chatId);
+        } 
+        else if (text === "📬 Check OTP" || text === "/otp") {
+          await checkCurrentOtp(chatId);
+        }
+
         return new Response("OK", { status: 200 });
       }
 
       return new Response("OK", { status: 200 });
-    } catch (err) {
+    } catch (e) {
       return new Response("OK", { status: 200 });
     }
   },
 
-  // --- 2. EMAIL ROUTING (META/INSTAGRAM ONLY) ---
+  // --- 2. EMAIL RECEIVER & DE-DUPLICATION ---
   async email(message, env, ctx) {
     try {
       const fromEmail = (message.from || "").toLowerCase().trim();
       const toEmail = (message.to || "").toLowerCase().trim();
 
-      // Check Meta/Instagram/Facebook Senders
-      const isAllowed = ALLOWED_SENDERS.some(d => fromEmail.includes(d));
-      if (!isAllowed) {
-        console.log("Blocked non-meta sender:", fromEmail);
-        return;
+      // Filter: Meta, Facebook, Instagram only
+      const isMeta = fromEmail.includes("meta") || 
+                     fromEmail.includes("facebook") || 
+                     fromEmail.includes("instagram");
+
+      if (!isMeta) {
+        return; // Ignore unwanted spam
       }
 
-      const rawStream = message.raw;
-      const reader = rawStream.getReader();
-      let rawContent = "";
-      const decoder = new TextDecoder("utf-8");
+      const raw = await new Response(message.raw).text();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        rawContent += decoder.decode(value, { stream: true });
-      }
-
-      const cleanBody = parseEmailContent(rawContent);
-
-      // Deep 6-digit & 8-digit OTP Parser
-      const otpRegex = /(?:code|otp|pin|security|código|passcode)[\s:=–-]{1,6}(\b\d{6,8}\b)/i;
-      const otpMatch = cleanBody.match(otpRegex) || cleanBody.match(/\b\d{6}\b/);
+      // Deep 6-8 digit OTP regex
+      const otpMatch = raw.match(/(?:code|otp|pin|security|código|passcode)[\s:=–-]{1,6}(\b\d{6,8}\b)/i) || 
+                       raw.match(/\b\d{6}\b/);
       const extractedOtp = otpMatch ? (otpMatch[1] || otpMatch[0]) : null;
 
-      // Link Extractor
-      const linkRegex = /(https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*)/i;
-      const linkMatch = cleanBody.match(linkRegex);
+      // Verification Link
+      const linkMatch = raw.match(/https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*/i);
       const verifyLink = linkMatch ? linkMatch[0] : null;
 
-      // ROUTING FIX: Agar kisi ko deliver na ho sake, direct PRIMARY_OWNER_ID ko bhejo!
-      let targetChatId = null;
-
-      if (ADMIN_WATCHED_EMAILS.has(toEmail)) {
-        targetChatId = ADMIN_WATCHED_EMAILS.get(toEmail);
-      } else if (toEmail.includes("x")) {
-        const id = toEmail.split("@")[0].split("x")[0];
-        if (/^\d+$/.test(id)) targetChatId = id;
+      // 🛡️ ANTI-DUPLICATE SHIELD: Rokta hai 5-6 baar aane wale messages ko
+      const dedupeKey = `${toEmail}_${extractedOtp || "NO_OTP"}`;
+      const now = Date.now();
+      if (RECENT_DELIVERIES.has(dedupeKey)) {
+        const lastSent = RECENT_DELIVERIES.get(dedupeKey);
+        if (now - lastSent < 120000) { // 2 minute ke andar same OTP dubara nahi bhejega
+          return;
+        }
       }
+      RECENT_DELIVERIES.set(dedupeKey, now);
 
-      // FALLBACK TO OWNER (Agar routing fail ho rahi thi toh ab miss nahi hoga)
+      // Save to memory for 'Check OTP' button
+      EMAIL_INBOX.set(toEmail, {
+        otp: extractedOtp,
+        link: verifyLink,
+        time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })
+      });
+
+      // Target User Find
+      let targetChatId = EMAIL_TO_USER.get(toEmail);
       if (!targetChatId) {
         targetChatId = PRIMARY_OWNER_ID;
       }
 
-      await deliverOtpMessage(targetChatId, extractedOtp, toEmail, verifyLink);
+      // Deliver 1 Clean Box Message
+      await deliverOtpBox(targetChatId, extractedOtp, toEmail, verifyLink);
 
-      // Backup: DB Channel Par Send Karo
+      // Log to DB Channel (Only Once)
       if (DB_CHANNEL_ID) {
         await callTelegram("sendMessage", {
           chat_id: DB_CHANNEL_ID,
-          text: `🔔 *[META EMAIL]*\nTo: \`${toEmail}\`\nFrom: \`${fromEmail}\`\nCode: \`${extractedOtp || "None"}\``,
+          text: `🔔 *[NEW OTP RECEIVED]*\nTo: \`${toEmail}\`\nOTP: \`${extractedOtp || "Link Only"}\``,
           parse_mode: "Markdown"
         });
       }
-    } catch (e) {
-      console.error("Email Error: " + e.message);
+    } catch (err) {
+      console.error("Email processor error:", err);
     }
   }
 };
 
-// --- SINGLE-TAP COPY OTP MESSAGE ---
-async function deliverOtpMessage(chatId, otp, toEmail, link) {
-  let text = "";
-  if (otp) {
-    text = `🔐 *META CODE (OTP):*\n\n\`${otp}\`\n\n_(Tap code to copy)_\n──────────────────\n📧 \`${toEmail}\``;
-  } else {
-    text = `📩 *New Meta Verification Email*\n──────────────────\n📧 \`${toEmail}\``;
+// --- HELPER: GENERATE CLEAN EMAIL ---
+async function generateNewEmail(chatId) {
+  // Clear old session
+  const oldEmail = USER_LAST_EMAIL.get(chatId);
+  if (oldEmail) {
+    EMAIL_TO_USER.delete(oldEmail);
+    EMAIL_INBOX.delete(oldEmail);
   }
 
-  let inlineButtons = [];
-  if (link) {
-    inlineButtons.push([{ text: "🌐 Open Verification Link", url: link }]);
-  }
+  const first = FEMALE_NAMES[(Math.random() * FEMALE_NAMES.length) | 0];
+  const last = SURNAMES[(Math.random() * SURNAMES.length) | 0];
+  const num = ((Math.random() * 900) | 0) + 100;
+  const newEmail = `${first}.${last}${num}@${DOMAIN}`.toLowerCase();
+
+  // Bind new session
+  USER_LAST_EMAIL.set(chatId, newEmail);
+  EMAIL_TO_USER.set(newEmail, chatId);
+
+  const messageText = 
+`✨ *Aapka Temp Email Taiyar Hai:*
+
+\`${newEmail}\`
+
+_(Upar email par tap karein, copy ho jayega)_
+━━━━━━━━━━━━━━━━━━━━
+Meta AI / Instagram me yeh email dalein, fir niche *Check OTP* dabayein.`;
+
+  const inlineBtns = [
+    [{ text: "📬 Check OTP", callback_data: "btn_check_otp" }],
+    [{ text: "🔄 Naya Email Banayein", callback_data: "btn_gen" }]
+  ];
 
   await callTelegram("sendMessage", {
     chat_id: chatId,
-    text: text,
+    text: messageText,
     parse_mode: "Markdown",
-    reply_markup: inlineButtons.length > 0 ? { inline_keyboard: inlineButtons } : undefined
+    reply_markup: { inline_keyboard: inlineBtns }
   });
 }
 
-// --- MESSAGE HANDLER ---
-async function handleIncomingMessage(msg) {
-  const chatId = msg.chat.id.toString();
-  const text = (msg.text || "").trim();
-  const isOwner = (chatId === PRIMARY_OWNER_ID.toString());
-  const isAdmin = ADMINS.has(chatId) || isOwner;
+// --- HELPER: CHECK OTP ON DEMAND ---
+async function checkCurrentOtp(chatId) {
+  const currentEmail = USER_LAST_EMAIL.get(chatId);
 
-  if (text === "/start") {
-    let mainKeyboard = [
-      [{ text: "⚡ Generate Email" }],
-      [{ text: "🔄 Change Email" }]
-    ];
-    if (isAdmin) {
-      mainKeyboard.push([{ text: "🔑 Old Email Hub" }]);
-    }
-
+  if (!currentEmail) {
     await callTelegram("sendMessage", {
       chat_id: chatId,
-      text: "⚡ *Meta AI & Instagram Mail Portal*\n\nNeeche button par tap karein:",
-      parse_mode: "Markdown",
-      reply_markup: {
-        keyboard: mainKeyboard,
-        resize_keyboard: true,
-        one_time_keyboard: false
-      }
-    });
-    return;
-  }
-
-  if (text === "⚡ Generate Email" || text === "🔄 Change Email" || text === "/gen" || text === "/new") {
-    await sendPureEmail(chatId);
-    return;
-  }
-
-  if (text === "🔑 Old Email Hub" && isAdmin) {
-    await callTelegram("sendMessage", {
-      chat_id: chatId,
-      text: `Old Mail Monitor Active for domain: \`${DOMAIN}\`\n\nKisi email ko direct watch karne ke liye:\n\`/watch email@${DOMAIN}\``,
+      text: "⚠️ Pehle ek email banayein: *⚡ Generate Email*",
       parse_mode: "Markdown"
     });
     return;
   }
 
-  if (text.startsWith("/watch") && isAdmin) {
-    const target = text.split(" ")[1];
-    if (target && target.includes("@")) {
-      ADMIN_WATCHED_EMAILS.set(target.toLowerCase().trim(), chatId);
-      await callTelegram("sendMessage", { chat_id: chatId, text: `🎯 Watching: \`${target.toLowerCase().trim()}\``, parse_mode: "Markdown" });
-    }
-    return;
+  const data = EMAIL_INBOX.get(currentEmail);
+
+  if (data && data.otp) {
+    await deliverOtpBox(chatId, data.otp, currentEmail, data.link);
+  } else {
+    await callTelegram("sendMessage", {
+      chat_id: chatId,
+      text: `⏳ *Waiting for Code...*\n\nEmail: \`${currentEmail}\`\n\nAbhi tak Meta se code nahi aaya hai. Resend Code karke 5 second baad dobara *Check OTP* dabayein.`,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh / Check OTP", callback_data: "btn_check_otp" }]
+        ]
+      }
+    });
   }
 }
 
-async function handleAction(chatId, data) {
-  if (data === "cmd_generate") {
-    await sendPureEmail(chatId);
-  }
-}
+// --- HELPER: CLEAN PROFESSIONAL OTP CARD ---
+async function deliverOtpBox(chatId, otp, toEmail, link) {
+  let text = "";
+  if (otp) {
+    text = 
+`┏━━━━━━━━━━━━━━━━━━━━━┓
+  🔐 *META VERIFICATION CODE*
+┗━━━━━━━━━━━━━━━━━━━━━┛
 
-// Clean Email Delivery (Pure text - tap to copy)
-async function sendPureEmail(chatId) {
-  const first = FEMALE_NAMES[(Math.random() * FEMALE_NAMES.length) | 0];
-  const last = SURNAMES[(Math.random() * SURNAMES.length) | 0];
-  const num = ((Math.random() * 900) | 0) + 100;
-  const email = `${first}.${last}${num}@${DOMAIN}`;
+\`${otp}\`
+
+_(Code par tap karke direct copy karein)_
+─────────────────────
+📧 *Email:* \`${toEmail}\``;
+  } else {
+    text = 
+`📩 *Verification Link Received:*
+─────────────────────
+📧 *Email:* \`${toEmail}\``;
+  }
+
+  let inlineBtns = [];
+  if (link) {
+    inlineBtns.push([{ text: "🌐 Open Verification Link", url: link }]);
+  }
+  inlineBtns.push([{ text: "⚡ Generate New Email", callback_data: "btn_gen" }]);
 
   await callTelegram("sendMessage", {
     chat_id: chatId,
-    text: `\`${email}\``,
-    parse_mode: "Markdown"
+    text: text,
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: inlineBtns }
   });
 }
 
-function parseEmailContent(raw) {
-  const parts = raw.split(/\r?\n\r?\n/);
-  let text = parts.slice(1).join("\n\n");
-  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-  text = text.replace(/<[^>]+>/g, " ");
-  text = text.replace(/&nbsp;/g, " ");
-  text = text.replace(/&amp;/g, "&");
-  text = text.replace(/&quot;/g, '"');
-  text = text.replace(/&lt;/g, "<");
-  text = text.replace(/&gt;/g, ">");
-  text = text.replace(/=\r?\n/g, "");
-  text = text.replace(/\s{2,}/g, " ").trim();
-  return text;
-}
-
+// --- TELEGRAM API CALL ---
 async function callTelegram(method, payload) {
   try {
     const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {

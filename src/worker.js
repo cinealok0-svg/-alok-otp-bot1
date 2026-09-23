@@ -1,23 +1,30 @@
-/** 
+/**
  * Professional Meta AI & Instagram Temp Mail Engine
  * Features:
- * - Custom Email Username Selection
- * - Admin-Only Old Email Hub (Strict Privacy Protection)
- * - Last 3 OTPs History per Email
- * - Full HTML Email Web Viewer (/view endpoint)
- * - Anti-Spam Rate Limiter (Cooldown Engine)
- * - Anti-Crash Compact Database with Auto-Pruning
+ * - Anti-Ghost OTP Fix (Strict 6-digit Meta pattern, ignores internal tracking IDs)
+ * - Multi-Admin Management System (/addadmin, /deladmin, /admins)
+ * - Strict Domain Filter: Meta, Facebook, Instagram only
+ * - Role-Based Access: Old Email Hub strictly for Owner & Admins
+ * - Cloudflare R2 Storage for Full HTML Email Viewer
+ * - Anti-Crash Compact Storage Engine
  */
 
 const BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA";
-const PRIMARY_OWNER_ID = "8452322818"; // Sirf ye ID purana email bind kar sakti hai
+const PRIMARY_OWNER_ID = "8452322818"; // Super Owner ID
 const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
-// In-Memory Runtime State
+// Official Whitelist Senders (Strict Filter)
+const ALLOWED_SENDERS = [
+  "facebookmail.com",
+  "instagram.com",
+  "mail.instagram.com",
+  "meta.com",
+  "support.facebook.com"
+];
+
 let USER_STATE = new Map();
 let USER_COOLDOWN = new Map();
-let HTML_PREVIEWS = new Map(); // Recent 50 HTML emails for web view
 
 const FEMALE_NAMES = [
   "priya", "ananya", "sneha", "pooja", "neha", "riya", "simran", "kajal",
@@ -32,52 +39,63 @@ const SURNAMES = [
 ];
 
 export default {
-  // --- 1. HTTP REQUEST / WEBHOOK & WEB VIEWER ROUTER ---
+  // --- 1. HTTP REQUEST / TELEGRAM WEBHOOK & R2 VIEWER ---
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // [FEATURE: Web View Endpoint for Full HTML]
+    // [R2 Storage HTML Web Viewer]
     if (url.pathname === "/view") {
-      const emailParam = (url.searchParams.get("mail") || "").toLowerCase();
-      const token = url.searchParams.get("token") || "";
-
-      const record = HTML_PREVIEWS.get(emailParam);
-      if (!record || record.token !== token) {
-        return new Response("<h3>⚠️ Email preview expired or invalid link.</h3>", {
+      const emailKey = (url.searchParams.get("id") || "").toLowerCase().trim();
+      if (!emailKey || !env.MAIL_BUCKET) {
+        return new Response("<h3>⚠️ Preview expired or storage not found.</h3>", {
           status: 404,
           headers: { "Content-Type": "text/html; charset=utf-8" }
         });
       }
 
-      return new Response(record.html, {
-        status: 200,
-        headers: { "Content-Type": "text/html; charset=utf-8" }
-      });
+      try {
+        const object = await env.MAIL_BUCKET.get(`html_${emailKey}`);
+        if (!object) {
+          return new Response("<h3>⚠️ Email content expired or removed.</h3>", {
+            status: 404,
+            headers: { "Content-Type": "text/html; charset=utf-8" }
+          });
+        }
+        const html = await object.text();
+        return new Response(html, {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8" }
+        });
+      } catch (e) {
+        return new Response("<h3>Server Error loading preview.</h3>", { status: 500 });
+      }
     }
 
-    if (request.method !== "POST") return new Response("Bot Engine OK", { status: 200 });
+    if (request.method !== "POST") return new Response("Worker Running OK", { status: 200 });
 
     try {
       const update = await request.json();
       const workerOrigin = `${url.protocol}//${url.host}`;
+      const { messageId, db } = await getChannelDb();
 
       // --- INLINE CALLBACK BUTTONS ---
       if (update.callback_query) {
         const q = update.callback_query;
         const chatId = q.message.chat.id.toString();
         const data = q.data;
+        const userIsAdmin = checkIsAdmin(chatId, db);
 
         if (data === "btn_gen") {
-          await handleEmailGenRequest(chatId, workerOrigin);
+          await handleEmailGenRequest(chatId, workerOrigin, db, messageId);
         } else if (data === "btn_custom") {
           await handleCustomNamePrompt(chatId);
         } else if (data === "btn_check_otp") {
-          await checkCurrentOtp(chatId, workerOrigin);
+          await checkCurrentOtp(chatId, workerOrigin, db);
         } else if (data === "btn_old_hub") {
-          if (chatId === PRIMARY_OWNER_ID) {
+          if (userIsAdmin) {
             await handleOldHubPrompt(chatId);
           } else {
-            await sendMsg(chatId, "⛔ *Access Denied:* Purana email access karne ki permission sirf Owner ke paas hai.");
+            await sendMsg(chatId, "⛔ *Access Denied:* Purana email access karne ki anumati sirf Admins ko hai.");
           }
         }
 
@@ -87,42 +105,98 @@ export default {
         }), { headers: { "Content-Type": "application/json" } });
       }
 
-      // --- INCOMING CHAT MESSAGES ---
+      // --- CHAT MESSAGES & ADMIN COMMANDS ---
       if (update.message) {
         const msg = update.message;
         const chatId = msg.chat.id.toString();
         const text = (msg.text || "").trim();
-        const isAdmin = (chatId === PRIMARY_OWNER_ID);
+        const isOwner = (chatId === PRIMARY_OWNER_ID);
+        const userIsAdmin = checkIsAdmin(chatId, db);
 
-        // State: Awaiting Custom Email Username
+        // State 1: Awaiting Custom Email Username
         if (USER_STATE.get(chatId) === "awaiting_custom_name") {
           USER_STATE.delete(chatId);
-          await processCustomEmailCreation(chatId, text, workerOrigin);
+          await processCustomEmailCreation(chatId, text, workerOrigin, db, messageId);
           return new Response("OK");
         }
 
-        // State: Awaiting Old Email (Strictly Owner Only)
+        // State 2: Awaiting Old Email (Only Owner/Admins)
         if (USER_STATE.get(chatId) === "awaiting_old_email") {
           USER_STATE.delete(chatId);
-          if (isAdmin) {
-            await linkAndCheckOldEmail(chatId, text, workerOrigin);
+          if (userIsAdmin) {
+            await linkAndCheckOldEmail(chatId, text, workerOrigin, db, messageId);
           } else {
-            await sendMsg(chatId, "⛔ *Security Alert:* Purana email restore karne ki anumati aapko nahi hai.");
+            await sendMsg(chatId, "⛔ *Access Denied:* Aap purane emails bind nahi kar sakte.");
           }
           return new Response("OK");
         }
 
-        // Direct Email Paste Check
+        // Direct Email Paste Validation
         if (text.toLowerCase().includes(`@${DOMAIN}`)) {
-          if (isAdmin) {
-            await linkAndCheckOldEmail(chatId, text, workerOrigin);
+          if (userIsAdmin) {
+            await linkAndCheckOldEmail(chatId, text, workerOrigin, db, messageId);
           } else {
-            await sendMsg(chatId, "⚠️ Dusre ka email yahan paste karke OTP nahi le sakte. Naya email lene ke liye *⚡ Random Email* ya *✏️ Custom Email* chunein.");
+            await sendMsg(chatId, "⚠️ Aap purana email yahan link nahi kar sakte. Naya email lene ke liye *⚡ Random Email* ya *✏️ Custom Email* chunein.");
           }
           return new Response("OK");
         }
 
-        // Commands & Main Menu
+        // --- ADMIN COMMAND: /addadmin <chat_id> ---
+        if (text.startsWith("/addadmin")) {
+          if (!isOwner) {
+            await sendMsg(chatId, "⛔ Sirf Main Owner naye Admins add kar sakta hai.");
+            return new Response("OK");
+          }
+          const targetId = text.split(" ")[1]?.trim();
+          if (!targetId || isNaN(targetId)) {
+            await sendMsg(chatId, "⚠️ Format galat hai. Aise likhein:\n`/addadmin 123456789`");
+            return new Response("OK");
+          }
+          if (!db.admins) db.admins = [];
+          if (!db.admins.includes(targetId)) {
+            db.admins.push(targetId);
+            await saveChannelDb(messageId, db);
+            await sendMsg(chatId, `✅ Chat ID \`${targetId}\` ko Admin bana diya gaya hai.`);
+            await sendMsg(targetId, "🎉 *Aapko is bot ka Admin bana diya gaya hai!* Ab aap purane emails ka OTP access kar sakte hain.");
+          } else {
+            await sendMsg(chatId, `⚠️ Chat ID \`${targetId}\` pehle se Admin hai.`);
+          }
+          return new Response("OK");
+        }
+
+        // --- ADMIN COMMAND: /deladmin <chat_id> ---
+        if (text.startsWith("/deladmin")) {
+          if (!isOwner) {
+            await sendMsg(chatId, "⛔ Sirf Main Owner hi Admin hata sakta hai.");
+            return new Response("OK");
+          }
+          const targetId = text.split(" ")[1]?.trim();
+          if (!targetId) {
+            await sendMsg(chatId, "⚠️ Format galat hai. Aise likhein:\n`/deladmin 123456789`");
+            return new Response("OK");
+          }
+          if (db.admins && db.admins.includes(targetId)) {
+            db.admins = db.admins.filter(id => id !== targetId);
+            await saveChannelDb(messageId, db);
+            await sendMsg(chatId, `❌ Chat ID \`${targetId}\` ko Admin se hata diya gaya.`);
+          } else {
+            await sendMsg(chatId, "⚠️ Yeh ID Admin list me nahi mili.");
+          }
+          return new Response("OK");
+        }
+
+        // --- ADMIN COMMAND: /admins ---
+        if (text === "/admins" || text === "/adminlist") {
+          if (!userIsAdmin) {
+            await sendMsg(chatId, "⛔ Permission Denied.");
+            return new Response("OK");
+          }
+          const list = (db.admins || []).map((id, i) => `${i + 1}. \`${id}\``).join("\n") || "Koi sub-admin nahi hai.";
+          await sendMsg(chatId, `👑 *Owner:* \`${PRIMARY_OWNER_ID}\`\n\n🛡️ *Authorized Admins:*\n${list}`);
+          return new Response("OK");
+        }
+
+        // --- MAIN MENU NAVIGATION ---
         if (text === "/start") {
           USER_STATE.delete(chatId);
 
@@ -131,29 +205,31 @@ export default {
             [{ text: "📬 Check OTP" }]
           ];
 
-          if (isAdmin) {
-            keyboard[1].push({ text: "🔑 Old Email Hub (Owner)" });
+          if (userIsAdmin) {
+            keyboard[1].push({ text: "🔑 Old Email Hub" });
           }
 
+          const roleBadge = isOwner ? "👑 *Owner Mode*" : (userIsAdmin ? "🛡️ *Admin Mode*" : "👤 *User Mode*");
+
           await sendMsg(chatId, 
-            `👋 *Meta AI & Instagram Temp Mail Hub*\n\nNaya email banayein ya apna custom username chunein. Meta AI / Instagram ka OTP turant instant deliver hoga!\n\n_Security: Aapka email aur OTP 100% private hai._`, 
+            `👋 *Meta AI & Instagram Temp Mail Engine*\n\nStatus: ${roleBadge}\n\nMeta AI aur Instagram ke genuine OTPs yahan turant deliver honge. Apna email generate karein:`, 
             { keyboard: keyboard, resize_keyboard: true }
           );
         } 
         else if (text === "⚡ Random Email" || text === "/gen") {
-          await handleEmailGenRequest(chatId, workerOrigin);
+          await handleEmailGenRequest(chatId, workerOrigin, db, messageId);
         }
         else if (text === "✏️ Custom Email" || text === "/custom") {
           await handleCustomNamePrompt(chatId);
         }
         else if (text === "📬 Check OTP" || text === "/otp") {
-          await checkCurrentOtp(chatId, workerOrigin);
+          await checkCurrentOtp(chatId, workerOrigin, db);
         }
-        else if (text.includes("Old Email Hub") || text === "/old") {
-          if (isAdmin) {
+        else if (text === "🔑 Old Email Hub" || text === "/old") {
+          if (userIsAdmin) {
             await handleOldHubPrompt(chatId);
           } else {
-            await sendMsg(chatId, "⛔ *Access Denied:* Yeh command sirf Bot Owner ke liye hai.");
+            await sendMsg(chatId, "⛔ *Access Denied:* Purana email access sirf Admins ke liye reserve hai.");
           }
         }
 
@@ -166,7 +242,7 @@ export default {
     }
   },
 
-  // --- 2. CLOUDFLARE EMAIL ROUTING RECEIVER ---
+  // --- 2. CLOUDFLARE EMAIL RECEIVER ---
   async email(message, env, ctx) {
     try {
       const rawFrom = (message.from || "").toLowerCase();
@@ -174,26 +250,29 @@ export default {
       const emailMatch = rawTo.match(/[\w.+%-]+@[\w.-]+\.[a-zA-Z]{2,}/);
       const toEmail = emailMatch ? emailMatch[0].trim() : rawTo.trim();
 
-      // Meta, Facebook, Instagram Source Check
-      const isMetaSource = rawFrom.includes("facebookmail.com") ||
-                           rawFrom.includes("instagram.com") ||
-                           rawFrom.includes("meta.com") ||
-                           rawFrom.includes("facebook.com");
+      // 1. Strict Sender Verification (Only Meta/Facebook/Instagram Allowed)
+      const isAllowedSender = ALLOWED_SENDERS.some(senderDomain => {
+        return rawFrom.endsWith(`@${senderDomain}`) || rawFrom.includes(`@${senderDomain}>`) || rawFrom.includes(senderDomain);
+      });
 
-      if (!isMetaSource) return; // Non-Meta emails ko ignore karein
+      if (!isAllowedSender) {
+        return; // Non-Meta mails ko direct drop karein (Spam/Other services rejected)
+      }
 
       const raw = await new Response(message.raw).text();
       const subject = message.headers.get("subject") || "";
 
+      // 2. Strict Meta AI / Instagram OTP Extraction (Strict 6 Digits)
       const extractedOtp = extractMetaAiOtp(subject, raw);
       const verifyLink = extractGenuineVerificationLink(raw);
 
+      // Agar genuine OTP ya Action link nahi hai to message drop
       if (!extractedOtp && !verifyLink) return;
 
       const { messageId, db } = await getChannelDb();
       const boundUser = db.emails ? db.emails[toEmail] : null;
 
-      // Deduplication: 5 min ke andar same code bar bar na bhejein
+      // 3. Strict Deduplication: Duplicate triggers stop
       const currentToken = extractedOtp || verifyLink;
       const prevRecord = db.inboxes ? db.inboxes[toEmail] : null;
       const now = Date.now();
@@ -202,7 +281,7 @@ export default {
         return;
       }
 
-      // History maintain karein (Last 3 OTPs)
+      // 4. Update History (Last 3 Real OTPs)
       let history = (prevRecord && Array.isArray(prevRecord.hist)) ? prevRecord.hist : [];
       if (extractedOtp) {
         history.unshift({
@@ -212,15 +291,15 @@ export default {
         if (history.length > 3) history = history.slice(0, 3);
       }
 
-      // Save to Web Preview Memory (50 items max)
-      const previewToken = Math.random().toString(36).substring(2, 10);
-      HTML_PREVIEWS.set(toEmail, { html: raw, token: previewToken });
-      if (HTML_PREVIEWS.size > 50) {
-        const oldestKey = HTML_PREVIEWS.keys().next().value;
-        HTML_PREVIEWS.delete(oldestKey);
+      // 5. Store Full HTML in R2 Storage
+      const previewKey = `${toEmail.replace(/[^a-z0-9]/g, "_")}`;
+      if (env.MAIL_BUCKET) {
+        await env.MAIL_BUCKET.put(`html_${previewKey}`, raw, {
+          httpMetadata: { contentType: "text/html; charset=utf-8" }
+        });
       }
 
-      // Compact Database Entry
+      // 6. Compact DB Save
       if (!db.inboxes) db.inboxes = {};
       db.inboxes[toEmail] = {
         otp: extractedOtp,
@@ -228,45 +307,48 @@ export default {
         tok: currentToken,
         ts: now,
         hist: history,
-        ptok: previewToken
+        hasHtml: true
       };
 
       await saveChannelDb(messageId, db);
 
-      // Deliver to user directly if bound
+      // 7. Deliver to Bound User ONLY
       if (boundUser) {
-        const workerOrigin = `https://${DOMAIN}`; // Fallback origin for web view button
-        await deliverOtpBox(boundUser, extractedOtp, toEmail, verifyLink, history, previewToken, workerOrigin);
+        const workerOrigin = `https://${DOMAIN}`;
+        const userIsAdmin = checkIsAdmin(boundUser, db);
+        await deliverOtpBox(boundUser, extractedOtp, toEmail, verifyLink, history, previewKey, workerOrigin, userIsAdmin);
       }
 
-      // DB Channel Log (Audit trail)
+      // 8. DB Channel Audit Notification
       if (DB_CHANNEL_ID) {
         await sendMsg(
           DB_CHANNEL_ID, 
-          `🔔 *[NEW META EMAIL]*\n📧 Email: \`${toEmail}\`\n👤 Linked User: \`${boundUser || "None"}\`\n🔑 OTP: \`${extractedOtp || "Link"}\``
+          `🔔 *[META OTP CAPTURED]*\n📧 Email: \`${toEmail}\`\n👤 Recipient: \`${boundUser || "Unbound"}\`\n🔑 OTP: \`${extractedOtp || "Link Only"}\``
         );
       }
 
     } catch (err) {
-      console.error("Email Routing Error:", err);
+      console.error("Email Ingestion Error:", err);
     }
   }
 };
 
-// --- OTP & LINK PARSERS ---
+// --- STRICT 6-DIGIT META/INSTAGRAM OTP EXTRACTOR ---
 function extractMetaAiOtp(subject, rawBody) {
   let body = rawBody
     .replace(/=\r?\n/g, "")
     .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 
+  // Priority 1: Check Subject Line (Meta hamesha subject me 6-digit code deta hai)
   if (subject) {
-    const subjMatch = subject.match(/\b(\d{3})\s?(\d{3})\b/) || subject.match(/\b(\d{6,8})\b/);
+    const subjMatch = subject.match(/\b(\d{3})\s?(\d{3})\b/) || subject.match(/\b(\d{6})\b/);
     if (subjMatch) {
       const code = subjMatch[0].replace(/\s+/g, "");
-      if (code.length >= 6 && code.length <= 8) return code;
+      if (code.length === 6 && !code.startsWith("000000")) return code;
     }
   }
 
+  // Pre-Clean: Head, Scripts, Styles and Hex CSS Colors (#ffffff, #141823)
   let cleanBody = body
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
@@ -274,32 +356,37 @@ function extractMetaAiOtp(subject, rawBody) {
     .replace(/#[0-9a-fA-F]{6}\b/g, " ")
     .replace(/#[0-9a-fA-F]{3}\b/g, " ");
 
-  const tagMatches = [...cleanBody.matchAll(/>\s*([0-9]{3}\s?[0-9]{3}|[0-9]{6,8})\s*</g)];
+  // Priority 2: HTML Containers (<div/span/font/td> 123456 </td>)
+  const tagMatches = [...cleanBody.matchAll(/>\s*([0-9]{3}\s?[0-9]{3}|[0-9]{6})\s*</g)];
   for (const m of tagMatches) {
     const code = m[1].replace(/\s+/g, "");
-    if (code.length >= 6 && code.length <= 8 && !code.startsWith("000000")) {
+    if (code.length === 6 && !code.startsWith("000000")) {
       return code;
     }
   }
 
+  // Priority 3: Plaintext with Strict Context Patterns
   let plain = cleanBody.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
+
   const patterns = [
-    /(?:code|otp|pin|passcode|confirmation code)[\s:=–-]{1,25}(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)/i,
-    /(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)\s*(?:is your|to verify|aapka code)/i,
-    /enter\s*(?:the|this)?\s*code\s*[:\s-]{1,25}(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)/i
+    /(?:security code|confirmation code|código|verification code|login code)[\s:=–\-#]{1,25}(\b\d{3}\s?\d{3}\b|\b\d{6}\b)/i,
+    /(\b\d{3}\s?\d{3}\b|\b\d{6}\b)\s*(?:is your|was requested|to verify your|aapka code)/i,
+    /enter\s*(?:the|this)?\s*code\s*[:\s-]{1,25}(\b\d{3}\s?\d{3}\b|\b\d{6}\b)/i
   ];
 
   for (const pat of patterns) {
     const match = plain.match(pat);
     if (match) {
       const code = (match[1] || match[0]).replace(/\D/g, "");
-      if (code.length >= 6 && code.length <= 8) return code;
+      if (code.length === 6 && !code.startsWith("000000")) return code;
     }
   }
 
+  // NOTE: Random 8-digit numbers ko strictly ignore kiya gaya hai taaki tracking ID leak na ho
   return null;
 }
 
+// --- VERIFICATION LINK EXTRACTOR ---
 function extractGenuineVerificationLink(raw) {
   const urls = raw.match(/https?:\/\/[^\s<>"{}|\\^`']+/gi) || [];
 
@@ -317,9 +404,16 @@ function extractGenuineVerificationLink(raw) {
   return null;
 }
 
-// --- DATABASE WITH TELEGRAM 4096 CHAR PROTECTION ---
+// --- ADMIN PERMISSION CHECKER ---
+function checkIsAdmin(chatId, db) {
+  if (chatId === PRIMARY_OWNER_ID) return true;
+  if (db && Array.isArray(db.admins) && db.admins.includes(chatId)) return true;
+  return false;
+}
+
+// --- COMPACT TELEGRAM CHANNEL DATABASE ---
 async function getChannelDb() {
-  const defaultDb = { users: {}, emails: {}, inboxes: {} };
+  const defaultDb = { admins: [], users: {}, emails: {}, inboxes: {} };
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChat?chat_id=${DB_CHANNEL_ID}`);
@@ -330,7 +424,12 @@ async function getChannelDb() {
         const parsed = JSON.parse(data.result.pinned_message.text);
         return { 
           messageId: data.result.pinned_message.message_id, 
-          db: { users: parsed.users || {}, emails: parsed.emails || {}, inboxes: parsed.inboxes || {} } 
+          db: { 
+            admins: parsed.admins || [], 
+            users: parsed.users || {}, 
+            emails: parsed.emails || {}, 
+            inboxes: parsed.inboxes || {} 
+          } 
         };
       } catch (err) {}
     }
@@ -359,16 +458,16 @@ async function getChannelDb() {
 async function saveChannelDb(messageId, db) {
   if (!messageId) return;
 
-  // Telegram character limit protection (Prune oldest logs to keep size tiny)
+  // Auto-Prune Engine: Keeps pinned message size strictly below 3800 bytes
   const inboxKeys = Object.keys(db.inboxes || {});
-  if (inboxKeys.length > 20) {
-    const removeCount = inboxKeys.length - 20;
+  if (inboxKeys.length > 15) {
+    const removeCount = inboxKeys.length - 15;
     for (let i = 0; i < removeCount; i++) delete db.inboxes[inboxKeys[i]];
   }
 
   const emailKeys = Object.keys(db.emails || {});
-  if (emailKeys.length > 35) {
-    const removeCount = emailKeys.length - 35;
+  if (emailKeys.length > 30) {
+    const removeCount = emailKeys.length - 30;
     for (let i = 0; i < removeCount; i++) delete db.emails[emailKeys[i]];
   }
 
@@ -385,15 +484,13 @@ async function saveChannelDb(messageId, db) {
   } catch (e) {}
 }
 
-// --- USER ACTIONS & HANDLERS ---
-
-// 1. Random Email Generator with Anti-Spam Cooldown
-async function handleEmailGenRequest(chatId, workerOrigin) {
+// --- USER ACTIONS ---
+async function handleEmailGenRequest(chatId, workerOrigin, db, messageId) {
   const lastCall = USER_COOLDOWN.get(chatId) || 0;
   const now = Date.now();
   if (now - lastCall < 15000) {
     const remaining = Math.ceil((15000 - (now - lastCall)) / 1000);
-    await sendMsg(chatId, `⏳ *Cooldown Active:* Kripya *${remaining} second* baad naya email banayein.`);
+    await sendMsg(chatId, `⏳ *Rate Limit:* Kripya *${remaining} second* rukiye.`);
     return;
   }
   USER_COOLDOWN.set(chatId, now);
@@ -403,12 +500,11 @@ async function handleEmailGenRequest(chatId, workerOrigin) {
   const num = ((Math.random() * 900) | 0) + 100;
   const newEmail = `${first}.${last}${num}@${DOMAIN}`.toLowerCase();
 
-  const { messageId, db } = await getChannelDb();
-
   db.users[chatId] = newEmail;
   db.emails[newEmail] = chatId;
   await saveChannelDb(messageId, db);
 
+  const userIsAdmin = checkIsAdmin(chatId, db);
   const msgText = 
 `✨ *Aapka Naya Temp Email:*
 
@@ -423,33 +519,34 @@ Ise Meta AI ya Instagram me enter karein. OTP aate hi bot yahan **instant delive
     [{ text: "✏️ Custom Username", callback_data: "btn_custom" }]
   ];
 
+  if (userIsAdmin) {
+    inlineBtns.push([{ text: "🔑 Link Old Email (Admin)", callback_data: "btn_old_hub" }]);
+  }
+
   await sendMsg(chatId, msgText, null, { inline_keyboard: inlineBtns });
 }
 
-// 2. Custom Username Flow
 async function handleCustomNamePrompt(chatId) {
   USER_STATE.set(chatId, "awaiting_custom_name");
   await sendMsg(
     chatId, 
-    `✏️ *Custom Email Username*\n\nApna pasandida username chat me type karke bhejein:\n\n_Udaharan:_ \`raj.sharma88\` ya \`angel_priya\`\n\n*(Sirf a-z, 0-9, dot, underscore allowed hain)*`
+    `✏️ *Custom Email Username*\n\nApna pasandida username chat me likhkar bhejein:\n\n_Example:_ \`karan.raj99\` ya \`sneha_vip\`\n\n*(Sirf a-z, 0-9, dot, underscore allowed hain)*`
   );
 }
 
-async function processCustomEmailCreation(chatId, inputName, workerOrigin) {
+async function processCustomEmailCreation(chatId, inputName, workerOrigin, db, messageId) {
   const cleanPrefix = inputName.replace(/@.*$/, "").toLowerCase().trim();
 
-  // Validate characters
   if (!/^[a-z0-9._-]{3,30}$/.test(cleanPrefix)) {
-    await sendMsg(chatId, "⚠️ *Invalid Format:* Username 3 se 30 characters ka hona chahiye aur sirf letters, numbers, dot, ya hyphen use karein.");
+    await sendMsg(chatId, "⚠️ *Invalid Format:* Username 3-30 letters ka hona chahiye aur special characters allowed nahi hain.");
     return;
   }
 
   const customEmail = `${cleanPrefix}@${DOMAIN}`;
-  const { messageId, db } = await getChannelDb();
 
-  // Security Check: Kya ye email pehle se kisi aur ke paas hai?
+  // Privacy Check: Ensure no other user is hijacked
   if (db.emails && db.emails[customEmail] && db.emails[customEmail] !== chatId) {
-    await sendMsg(chatId, `⛔ *Already Claimed:* \`${customEmail}\` pehle se kisi aur user ke pass registered hai. Kripya koi dusra naam try karein.`);
+    await sendMsg(chatId, `⛔ *Already Taken:* \`${customEmail}\` kisi aur user ke pass registered hai. Kripya koi dusra naam chunein.`);
     return;
   }
 
@@ -457,6 +554,7 @@ async function processCustomEmailCreation(chatId, inputName, workerOrigin) {
   db.emails[customEmail] = chatId;
   await saveChannelDb(messageId, db);
 
+  const userIsAdmin = checkIsAdmin(chatId, db);
   const msgText = 
 `🎯 *Custom Email Activated!*
 
@@ -464,87 +562,88 @@ async function processCustomEmailCreation(chatId, inputName, workerOrigin) {
 
 _(Tap karke copy karein)_
 ━━━━━━━━━━━━━━━━━━━━
-Ab is email ko Meta AI / Instagram me dalein aur yahan OTP receive karein.`;
+Ab is email ko Meta AI ya Instagram me enter karein.`;
 
   const inlineBtns = [
     [{ text: "🔄 Refresh / Check OTP", callback_data: "btn_check_otp" }]
   ];
 
+  if (userIsAdmin) {
+    inlineBtns.push([{ text: "🔑 Link Old Email (Admin)", callback_data: "btn_old_hub" }]);
+  }
+
   await sendMsg(chatId, msgText, null, { inline_keyboard: inlineBtns });
 }
 
-// 3. Check Current OTP
-async function checkCurrentOtp(chatId, workerOrigin) {
-  const { db } = await getChannelDb();
+async function checkCurrentOtp(chatId, workerOrigin, db) {
   const currentEmail = db.users ? db.users[chatId] : null;
 
   if (!currentEmail) {
-    await sendMsg(chatId, "⚠️ Aapke paas koi active email nahi hai. *⚡ Random Email* ya *✏️ Custom Email* par click karein.");
+    await sendMsg(chatId, "⚠️ Aapka koi active email nahi mila. Pehle *⚡ Random Email* par click karein.");
     return;
   }
 
   const record = db.inboxes ? db.inboxes[currentEmail] : null;
+  const userIsAdmin = checkIsAdmin(chatId, db);
 
   if (record && (record.otp || record.lnk)) {
-    await deliverOtpBox(chatId, record.otp, currentEmail, record.lnk, record.hist || [], record.ptok, workerOrigin);
+    const previewKey = currentEmail.replace(/[^a-z0-9]/g, "_");
+    await deliverOtpBox(chatId, record.otp, currentEmail, record.lnk, record.hist || [], previewKey, workerOrigin, userIsAdmin);
   } else {
     await sendMsg(
       chatId, 
-      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nMeta/Instagram app me jaakar code send karein, fir yahan refresh karein.`,
+      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nMeta/Instagram app se OTP send karein, fir yahan refresh karein.`,
       null,
       { inline_keyboard: [[{ text: "🔄 Refresh Status", callback_data: "btn_check_otp" }]] }
     );
   }
 }
 
-// 4. Admin Only: Old Email Hub
 async function handleOldHubPrompt(chatId) {
   USER_STATE.set(chatId, "awaiting_old_email");
   await sendMsg(
     chatId, 
-    `🔑 *Owner Hub - Purana Email Access*\n\nJis purane email ka OTP dekhna hai, woh yahan bhejein:\n\n_Example:_\n\`priya.sharma123@${DOMAIN}\``
+    `🔑 *Admin Recovery Hub*\n\nJis purane email ka OTP dekhna hai, woh address yahan bhejein:\n\n_Example:_ \`muskan.sharma991@${DOMAIN}\``
   );
 }
 
-async function linkAndCheckOldEmail(chatId, inputEmail, workerOrigin) {
+async function linkAndCheckOldEmail(chatId, inputEmail, workerOrigin, db, messageId) {
   const cleanEmail = inputEmail.toLowerCase().trim();
 
   if (!cleanEmail.endsWith(`@${DOMAIN}`)) {
-    await sendMsg(chatId, `⚠️ Invalid Domain! Email \`@${DOMAIN}\` par hi hona chahiye.`);
+    await sendMsg(chatId, `⚠️ Invalid Domain! Email \`@${DOMAIN}\` par khatam hona chahiye.`);
     return;
   }
-
-  const { messageId, db } = await getChannelDb();
 
   db.users[chatId] = cleanEmail;
   db.emails[cleanEmail] = chatId;
   await saveChannelDb(messageId, db);
 
   const record = db.inboxes ? db.inboxes[cleanEmail] : null;
+  const userIsAdmin = checkIsAdmin(chatId, db);
 
   if (record && (record.otp || record.lnk)) {
-    await sendMsg(chatId, `✅ *Owner Verified:* Purana email link ho gaya! Active OTP card:`);
-    await deliverOtpBox(chatId, record.otp, cleanEmail, record.lnk, record.hist || [], record.ptok, workerOrigin);
+    const previewKey = cleanEmail.replace(/[^a-z0-9]/g, "_");
+    await sendMsg(chatId, `✅ *Email Linked (Admin Authorized)!* Active OTP Card:`);
+    await deliverOtpBox(chatId, record.otp, cleanEmail, record.lnk, record.hist || [], previewKey, workerOrigin, userIsAdmin);
   } else {
     await sendMsg(
       chatId, 
-      `✅ *Owner Connected:* \`${cleanEmail}\` bind ho gaya hai.\n\nAb app me 'Resend OTP' karein, OTP seedhe aapko milega.`,
+      `✅ *Email Successfully Bound!*\n\nTarget Email: \`${cleanEmail}\`\n\nAb app me jakar 'Resend OTP' karein, OTP turant yahan receive hoga.`,
       null,
-      { inline_keyboard: [[{ text: "🔄 Refresh OTP", callback_data: "btn_check_otp" }]] }
+      { inline_keyboard: [[{ text: "🔄 Check OTP", callback_data: "btn_check_otp" }]] }
     );
   }
 }
 
-// 5. Deliver OTP Card with History & Web Preview
-async function deliverOtpBox(chatId, otp, toEmail, link, history = [], previewToken = "", workerOrigin = "") {
+// --- SECURE OTP DELIVERY CARD ---
+async function deliverOtpBox(chatId, otp, toEmail, link, history = [], previewKey = "", workerOrigin = "", isAdmin = false) {
   let historySection = "";
   if (history.length > 1) {
     historySection = `\n📜 *Pichle OTPs:*\n` + history.map(h => `• \`${h.otp}\` _(${h.time})_`).join("\n");
   }
 
-  let text = "";
-  if (otp) {
-    text = 
+  let text = otp ? 
 `┏━━━━━━━━━━━━━━━━━━━━━┓
   🔐 *META VERIFICATION OTP*
 ┗━━━━━━━━━━━━━━━━━━━━━┛
@@ -553,38 +652,35 @@ async function deliverOtpBox(chatId, otp, toEmail, link, history = [], previewTo
 
 _(Tap code to copy)_
 ─────────────────────
-📧 *Email:* \`${toEmail}\`${historySection}`;
-  } else {
-    text = 
+📧 *Email:* \`${toEmail}\`${historySection}` : 
 `📩 *Verification Link Received!*
 ─────────────────────
 📧 *Email:* \`${toEmail}\``;
-  }
 
   let inlineBtns = [];
   if (link) {
     inlineBtns.push([{ text: "🌐 Open Verification Link", url: link }]);
   }
 
-  // Full HTML Web Preview Button
-  if (previewToken && workerOrigin) {
-    const viewUrl = `${workerOrigin}/view?mail=${encodeURIComponent(toEmail)}&token=${previewToken}`;
+  if (previewKey && workerOrigin) {
+    const viewUrl = `${workerOrigin}/view?id=${previewKey}`;
     inlineBtns.push([{ text: "📄 View Full HTML Email", url: viewUrl }]);
   }
 
   inlineBtns.push([
     { text: "🔄 Refresh Status", callback_data: "btn_check_otp" },
-    { text: "⚡ New Random", callback_data: "btn_gen" }
+    { text: "⚡ Generate New", callback_data: "btn_gen" }
   ]);
 
-  if (chatId === PRIMARY_OWNER_ID) {
-    inlineBtns.push([{ text: "🔑 Link Another Old Email", callback_data: "btn_old_hub" }]);
+  // Security: "Link Another Email" button sirf Admins aur Owner ko dikhega
+  if (isAdmin) {
+    inlineBtns.push([{ text: "🔑 Link Another Email (Admin)", callback_data: "btn_old_hub" }]);
   }
 
   await sendMsg(chatId, text, null, { inline_keyboard: inlineBtns });
 }
 
-// --- TELEGRAM SENDER UTILITY ---
+// --- TELEGRAM SENDER ---
 async function sendMsg(chatId, text, replyKeyboard = null, inlineKeyboard = null) {
   const payload = {
     chat_id: chatId,

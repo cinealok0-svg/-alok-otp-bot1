@@ -1,6 +1,6 @@
 /**
  * Professional Meta AI & Instagram Temp Mail Engine
- * Storage Engine: Telegram Channel Pinned Message DB
+ * Fix: Removed CSS Hex Color (#141823) false-positive & Subject-line OTP extractor
  * Domain: vibepulsemedia.online
  */
 
@@ -9,9 +9,11 @@ const PRIMARY_OWNER_ID = "8452322818";
 const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
-// In-Memory Fallback & Short-lived state
-let USER_STATE = new Map(); // chatId -> "awaiting_old_email"
-let MEMORY_LOCK = new Set(); // Instant millisecond deduplication shield
+// In-Memory Fallbacks
+let USER_STATE = new Map();
+let MEMORY_LOCK = new Set();
+let MEMORY_INBOX = new Map();
+let MEMORY_USERS = new Map();
 
 const FEMALE_NAMES = [
   "priya", "ananya", "sneha", "pooja", "neha", "riya", "simran", "kajal",
@@ -33,7 +35,7 @@ export default {
     try {
       const update = await request.json();
 
-      // Inline Buttons Callback
+      // Inline Callback Buttons
       if (update.callback_query) {
         const q = update.callback_query;
         const chatId = q.message.chat.id.toString();
@@ -53,26 +55,23 @@ export default {
         }), { headers: { "Content-Type": "application/json" } });
       }
 
-      // Incoming Chat Messages
+      // Incoming Messages
       if (update.message) {
         const msg = update.message;
         const chatId = msg.chat.id.toString();
         const text = (msg.text || "").trim();
 
-        // Check if user is typing an Old Email after clicking Old Email Hub
         if (USER_STATE.get(chatId) === "awaiting_old_email") {
           USER_STATE.delete(chatId);
           await linkAndCheckOldEmail(chatId, text);
           return new Response("OK");
         }
 
-        // Direct Email Paste handling
         if (text.includes(`@${DOMAIN}`)) {
           await linkAndCheckOldEmail(chatId, text);
           return new Response("OK");
         }
 
-        // Main Menu Controls
         if (text === "/start") {
           USER_STATE.delete(chatId);
           const keyboard = [
@@ -81,7 +80,7 @@ export default {
           ];
 
           await sendMsg(chatId, 
-            "👋 *Instagram & Meta Temp Mail Hub*\n\nNaya email create karne ya kisi bhi purane email ka OTP track karne ke liye option chunein:", 
+            "👋 *Instagram & Meta Temp Mail Hub*\n\nNaya email create karne ya purane email ka real OTP check karne ke liye option chunein:", 
             { keyboard: keyboard, resize_keyboard: true }
           );
         } 
@@ -114,7 +113,6 @@ export default {
       const emailMatch = rawTo.match(/[\w.+%-]+@[\w.-]+\.[a-zA-Z]{2,}/);
       const toEmail = (emailMatch ? emailMatch[0] : rawTo).toLowerCase().trim();
 
-      // Filter: Meta, Facebook, Instagram only
       const isMeta = rawFrom.includes("meta") || 
                      rawFrom.includes("facebook") || 
                      rawFrom.includes("instagram");
@@ -122,11 +120,10 @@ export default {
       if (!isMeta) return;
 
       const raw = await new Response(message.raw).text();
+      const subject = message.headers.get("subject") || "";
 
-      // Extract 6 to 8 digit OTP strictly
-      const otpMatch = raw.match(/(?:code|otp|pin|passcode|código)[\s:=–-]{1,8}(\b\d{6,8}\b)/i) || 
-                       raw.match(/\b\d{6}\b/);
-      const extractedOtp = otpMatch ? (otpMatch[1] || otpMatch[0]) : null;
+      // Clean & Extract Genuine OTP
+      const extractedOtp = extractRealOtp(subject, raw);
 
       // Extract Verification Link
       const linkMatch = raw.match(/https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*/i);
@@ -134,20 +131,14 @@ export default {
 
       if (!extractedOtp && !verifyLink) return;
 
-      // --- DEDUPLICATION SHIELD 1: In-Memory Instant Lock ---
+      // Duplicate prevention lock
       const dedupeKey = `${toEmail}_${extractedOtp || verifyLink}`;
       if (MEMORY_LOCK.has(dedupeKey)) return;
       MEMORY_LOCK.add(dedupeKey);
 
-      // --- DEDUPLICATION SHIELD 2: Read Telegram Channel DB ---
+      // Save into DB Channel
       const { messageId, db } = await getChannelDb();
 
-      // Agar is email par ye OTP pehle hi deliver ho chuka hai toh dobara mat bhejo
-      if (db.inboxes && db.inboxes[toEmail] && db.inboxes[toEmail].otp === extractedOtp && db.inboxes[toEmail].delivered) {
-        return;
-      }
-
-      // Store in Channel DB
       if (!db.inboxes) db.inboxes = {};
       db.inboxes[toEmail] = {
         otp: extractedOtp,
@@ -156,20 +147,23 @@ export default {
         delivered: true
       };
 
-      // Determine bound owner
-      const boundUser = (db.emails && db.emails[toEmail]) ? db.emails[toEmail] : PRIMARY_OWNER_ID;
+      // Also keep in worker memory
+      MEMORY_INBOX.set(toEmail, db.inboxes[toEmail]);
 
-      // Update Channel DB Message
+      const boundUser = (db.emails && db.emails[toEmail]) ? db.emails[toEmail] : (MEMORY_USERS.get(toEmail) || PRIMARY_OWNER_ID);
+
       await saveChannelDb(messageId, db);
 
-      // Deliver 1-Time directly to User
+      // Send to user
       await deliverOtpBox(boundUser, extractedOtp, toEmail, verifyLink);
 
-      // Post Visual Log in DB Channel
-      await sendMsg(
-        DB_CHANNEL_ID, 
-        `🔔 *[NEW OTP RECEIVED]*\n📧 Email: \`${toEmail}\`\n👤 User ID: \`${boundUser}\`\n🔑 OTP: \`${extractedOtp || "Link Only"}\``
-      );
+      // Log in channel
+      if (DB_CHANNEL_ID) {
+        await sendMsg(
+          DB_CHANNEL_ID, 
+          `🔔 *[REAL OTP CAPTURED]*\n📧 Recipient: \`${toEmail}\`\n👤 User: \`${boundUser}\`\n🔑 OTP: \`${extractedOtp || "Link Only"}\``
+        );
+      }
 
     } catch (err) {
       console.error("Email Error:", err);
@@ -177,8 +171,45 @@ export default {
   }
 };
 
-// --- TELEGRAM CHANNEL DATABASE ENGINE (PINNED MESSAGE) ---
+// --- REAL OTP PARSER (ELIMINATES CSS COLOR BUG) ---
+function extractRealOtp(subject, rawBody) {
+  // 1. Instagram/Meta Subject Line Check (Sabse accurate)
+  // Example: "145892 is your Instagram code" ya "592 104 is your code"
+  if (subject) {
+    const subjMatch = subject.match(/\b(\d{3})\s?(\d{3})\b/) ||
+                      subject.match(/(?:code|otp|pin|código)[\s:=–-]{1,5}(\d{6,8})/i) ||
+                      subject.match(/(\d{6,8})\s+(?:is your|ka code|aapka code)/i);
+    if (subjMatch) {
+      return (subjMatch[1] && subjMatch[2]) ? (subjMatch[1] + subjMatch[2]) : (subjMatch[1] || subjMatch[0]);
+    }
+  }
 
+  // 2. Body Cleaning: Remove CSS styles, head, and all #HEX color codes
+  let clean = rawBody
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, " ")
+    .replace(/#[0-9a-fA-F]{6}/g, " ")  // Remove #141823 and any hex color
+    .replace(/#[0-9a-fA-F]{3}/g, " ")
+    .replace(/<[^>]+>/g, " ")          // Strip HTML tags
+    .replace(/&nbsp;/g, " ");
+
+  // 3. Match Pattern: "123456 is your Instagram code"
+  const beforePattern = clean.match(/\b(\d{3})\s?(\d{3})\b\s*(?:is your|was requested|aapka code|use this code)/i) ||
+                        clean.match(/\b(\d{6,8})\b\s*(?:is your|was requested|to verify)/i);
+  if (beforePattern) {
+    return beforePattern[2] ? (beforePattern[1] + beforePattern[2]) : (beforePattern[1] || beforePattern[0]);
+  }
+
+  // 4. Match Pattern: "code: 123456"
+  const afterPattern = clean.match(/(?:code|otp|pin|passcode|código|verification)[\s:=–-]{1,10}(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)/i);
+  if (afterPattern) {
+    return afterPattern[1].replace(/\s+/g, "");
+  }
+
+  return null;
+}
+
+// --- TELEGRAM CHANNEL DATABASE ENGINE ---
 async function getChannelDb() {
   const defaultDb = { users: {}, emails: {}, inboxes: {} };
 
@@ -190,12 +221,9 @@ async function getChannelDb() {
       try {
         const parsed = JSON.parse(data.result.pinned_message.text);
         return { messageId: data.result.pinned_message.message_id, db: parsed };
-      } catch (err) {
-        // Pinned message was not valid JSON, create a fresh one below
-      }
+      } catch (err) {}
     }
 
-    // Agar channel me abhi tak koi DB message nahi hai, toh naya bana kar pin karein
     const initRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -219,9 +247,7 @@ async function getChannelDb() {
       });
       return { messageId: newMsgId, db: defaultDb };
     }
-  } catch (e) {
-    console.error("DB Fetch Error:", e);
-  }
+  } catch (e) {}
 
   return { messageId: null, db: defaultDb };
 }
@@ -229,7 +255,6 @@ async function getChannelDb() {
 async function saveChannelDb(messageId, db) {
   if (!messageId) return;
 
-  // Auto-prune old records to stay safely under Telegram's 4096 character limit
   const emailKeys = Object.keys(db.inboxes || {});
   if (emailKeys.length > 25) {
     const oldestKeys = emailKeys.slice(0, emailKeys.length - 25);
@@ -249,19 +274,16 @@ async function saveChannelDb(messageId, db) {
         text: JSON.stringify(db)
       })
     });
-  } catch (e) {
-    console.error("DB Save Error:", e);
-  }
+  } catch (e) {}
 }
 
-// --- HELPER: GENERATE NEW EMAIL ---
+// --- GENERATE NEW EMAIL ---
 async function generateNewEmail(chatId) {
   const first = FEMALE_NAMES[(Math.random() * FEMALE_NAMES.length) | 0];
   const last = SURNAMES[(Math.random() * SURNAMES.length) | 0];
   const num = ((Math.random() * 900) | 0) + 100;
   const newEmail = `${first}.${last}${num}@${DOMAIN}`.toLowerCase();
 
-  // Save to Telegram Channel DB
   const { messageId, db } = await getChannelDb();
   if (!db.users) db.users = {};
   if (!db.emails) db.emails = {};
@@ -269,6 +291,8 @@ async function generateNewEmail(chatId) {
   db.users[chatId] = newEmail;
   db.emails[newEmail] = chatId;
   await saveChannelDb(messageId, db);
+
+  MEMORY_USERS.set(newEmail, chatId);
 
   const messageText = 
 `✨ *Aapka Naya Temp Email Taiyar Hai:*
@@ -287,7 +311,7 @@ Yeh email Instagram / Meta me dalein. OTP aate hi yahan **turant ek bar** delive
   await sendMsg(chatId, messageText, null, { inline_keyboard: inlineBtns });
 }
 
-// --- HELPER: CHECK OTP / REFRESH BUTTON ---
+// --- CHECK OTP / REFRESH BUTTON ---
 async function checkCurrentOtp(chatId) {
   const { db } = await getChannelDb();
   const currentEmail = db.users ? db.users[chatId] : null;
@@ -297,30 +321,30 @@ async function checkCurrentOtp(chatId) {
     return;
   }
 
-  const record = db.inboxes ? db.inboxes[currentEmail] : null;
+  const record = (db.inboxes && db.inboxes[currentEmail]) ? db.inboxes[currentEmail] : MEMORY_INBOX.get(currentEmail);
 
   if (record && (record.otp || record.link)) {
     await deliverOtpBox(chatId, record.otp, currentEmail, record.link);
   } else {
     await sendMsg(
       chatId, 
-      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nInstagram / Meta se OTP send karein. Aate hi turant yahan mil jayega.`,
+      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nInstagram se OTP send karein. Aate hi yahan display ho jayega.`,
       null,
       { inline_keyboard: [[{ text: "🔄 Refresh Status", callback_data: "btn_check_otp" }]] }
     );
   }
 }
 
-// --- HELPER: OLD EMAIL HUB PROMPT ---
+// --- OLD EMAIL HUB PROMPT ---
 async function handleOldHubPrompt(chatId) {
   USER_STATE.set(chatId, "awaiting_old_email");
   await sendMsg(
     chatId, 
-    "🔑 *Old Email Hub*\n\nApna purana email address yahan chat me paste karein:\n\n_Example:_\n`anjali.saxena842@vibepulsemedia.online`\n\nIs email ka purana OTP ya aane wala naya OTP seedhe aapke chat par aayega."
+    "🔑 *Old Email Hub*\n\nApna purana email address yahan chat me paste karein:\n\n_Example:_\n`anjali.saxena842@vibepulsemedia.online`\n\nIs email par aane wala OTP seedhe aapko milega."
   );
 }
 
-// --- HELPER: LINK OLD EMAIL EXCLUSIVELY ---
+// --- LINK OLD EMAIL ---
 async function linkAndCheckOldEmail(chatId, inputEmail) {
   const cleanEmail = inputEmail.toLowerCase().trim();
 
@@ -333,28 +357,28 @@ async function linkAndCheckOldEmail(chatId, inputEmail) {
   if (!db.users) db.users = {};
   if (!db.emails) db.emails = {};
 
-  // Email ko is user ke sath lock kar dein
   db.users[chatId] = cleanEmail;
   db.emails[cleanEmail] = chatId;
   await saveChannelDb(messageId, db);
 
-  const record = db.inboxes ? db.inboxes[cleanEmail] : null;
+  MEMORY_USERS.set(cleanEmail, chatId);
 
-  // Agar is email ka OTP pehle se channel me maujood hai
+  const record = (db.inboxes && db.inboxes[cleanEmail]) ? db.inboxes[cleanEmail] : MEMORY_INBOX.get(cleanEmail);
+
   if (record && (record.otp || record.link)) {
-    await sendMsg(chatId, `✅ *Email Successfully Linked!*\nIs email ka latest OTP mil gaya hai:`);
+    await sendMsg(chatId, `✅ *Email Linked!*\nIs email ka latest OTP:`);
     await deliverOtpBox(chatId, record.otp, cleanEmail, record.link);
   } else {
     await sendMsg(
       chatId, 
-      `✅ *Email Successfully Linked!*\n\nTarget Email: \`${cleanEmail}\`\n\n📡 *Status:* Yeh email aapke account se link ho gaya hai. Ab aap Instagram me 'Resend OTP' karein, OTP seedhe yahan aayega.`,
+      `✅ *Email Successfully Linked!*\n\nTarget Email: \`${cleanEmail}\`\n\n📡 *Status:* Yeh email aapke bot se link ho gaya hai. Ab aap Instagram me 'Resend OTP' karein, naya OTP seedhe yahan aayega.`,
       null,
       { inline_keyboard: [[{ text: "🔄 Check / Refresh OTP", callback_data: "btn_check_otp" }]] }
     );
   }
 }
 
-// --- HELPER: CLEAN 1-TAP COPY CARD ---
+// --- OTP BOX DISPLAY ---
 async function deliverOtpBox(chatId, otp, toEmail, link) {
   let text = "";
   if (otp) {
@@ -390,7 +414,7 @@ _(Tap code to copy)_
   await sendMsg(chatId, text, null, { inline_keyboard: inlineBtns });
 }
 
-// --- TELEGRAM SENDER ---
+// --- TELEGRAM CALLER ---
 async function sendMsg(chatId, text, replyKeyboard = null, inlineKeyboard = null) {
   const payload = {
     chat_id: chatId,

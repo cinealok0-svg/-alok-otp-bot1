@@ -1,6 +1,6 @@
 /**
  * Professional Meta AI & Instagram Temp Mail Engine
- * Fix: Removed CSS Hex Color (#141823) false-positive & Subject-line OTP extractor
+ * Fixes: Meta AI HTML OTP Parser + Anti-Pixel/Tracking Black Screen Filter
  * Domain: vibepulsemedia.online
  */
 
@@ -9,9 +9,8 @@ const PRIMARY_OWNER_ID = "8452322818";
 const DB_CHANNEL_ID = "-1004474665956";
 const DOMAIN = "vibepulsemedia.online";
 
-// In-Memory Fallbacks
 let USER_STATE = new Map();
-let MEMORY_LOCK = new Set();
+let MEMORY_LOCK = new Map();
 let MEMORY_INBOX = new Map();
 let MEMORY_USERS = new Map();
 
@@ -55,23 +54,26 @@ export default {
         }), { headers: { "Content-Type": "application/json" } });
       }
 
-      // Incoming Messages
+      // Incoming Chat Messages
       if (update.message) {
         const msg = update.message;
         const chatId = msg.chat.id.toString();
         const text = (msg.text || "").trim();
 
+        // Old email hub listener
         if (USER_STATE.get(chatId) === "awaiting_old_email") {
           USER_STATE.delete(chatId);
           await linkAndCheckOldEmail(chatId, text);
           return new Response("OK");
         }
 
+        // Direct email paste
         if (text.includes(`@${DOMAIN}`)) {
           await linkAndCheckOldEmail(chatId, text);
           return new Response("OK");
         }
 
+        // Main Menu
         if (text === "/start") {
           USER_STATE.delete(chatId);
           const keyboard = [
@@ -80,7 +82,7 @@ export default {
           ];
 
           await sendMsg(chatId, 
-            "👋 *Instagram & Meta Temp Mail Hub*\n\nNaya email create karne ya purane email ka real OTP check karne ke liye option chunein:", 
+            "👋 *Meta AI & Instagram Temp Mail Hub*\n\nNaya email create karein ya kisi bhi purane email ka real OTP check karein:", 
             { keyboard: keyboard, resize_keyboard: true }
           );
         } 
@@ -113,6 +115,7 @@ export default {
       const emailMatch = rawTo.match(/[\w.+%-]+@[\w.-]+\.[a-zA-Z]{2,}/);
       const toEmail = (emailMatch ? emailMatch[0] : rawTo).toLowerCase().trim();
 
+      // Meta, Instagram, Facebook filters
       const isMeta = rawFrom.includes("meta") || 
                      rawFrom.includes("facebook") || 
                      rawFrom.includes("instagram");
@@ -122,94 +125,151 @@ export default {
       const raw = await new Response(message.raw).text();
       const subject = message.headers.get("subject") || "";
 
-      // Clean & Extract Genuine OTP
-      const extractedOtp = extractRealOtp(subject, raw);
+      // 1. Accurate Meta AI OTP Extraction
+      const extractedOtp = extractMetaAiOtp(subject, raw);
 
-      // Extract Verification Link
-      const linkMatch = raw.match(/https?:\/\/[^\s<>"{}|\\^`]+(?:instagram\.com|facebook\.com|meta\.com)[^\s<>"{}|\\^`]*/i);
-      const verifyLink = linkMatch ? linkMatch[0] : null;
+      // 2. Strict Link Extraction (Filters out 1x1 black screen pixels)
+      const verifyLink = extractGenuineVerificationLink(raw);
 
+      // OTP aur Link dono nahi mile toh message mat bhejo
       if (!extractedOtp && !verifyLink) return;
 
-      // Duplicate prevention lock
+      // 3. Strict Deduplication (Prevents 2x-3x delivery)
       const dedupeKey = `${toEmail}_${extractedOtp || verifyLink}`;
-      if (MEMORY_LOCK.has(dedupeKey)) return;
-      MEMORY_LOCK.add(dedupeKey);
+      const now = Date.now();
+      if (MEMORY_LOCK.has(dedupeKey)) {
+        if (now - MEMORY_LOCK.get(dedupeKey) < 180000) return; // 3 min lock
+      }
+      MEMORY_LOCK.set(dedupeKey, now);
 
-      // Save into DB Channel
+      // 4. Save to DB Channel
       const { messageId, db } = await getChannelDb();
 
       if (!db.inboxes) db.inboxes = {};
       db.inboxes[toEmail] = {
         otp: extractedOtp,
         link: verifyLink,
-        time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }),
-        delivered: true
+        time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })
       };
 
-      // Also keep in worker memory
       MEMORY_INBOX.set(toEmail, db.inboxes[toEmail]);
 
-      const boundUser = (db.emails && db.emails[toEmail]) ? db.emails[toEmail] : (MEMORY_USERS.get(toEmail) || PRIMARY_OWNER_ID);
+      const boundUser = (db.emails && db.emails[toEmail]) 
+        ? db.emails[toEmail] 
+        : (MEMORY_USERS.get(toEmail) || PRIMARY_OWNER_ID);
 
       await saveChannelDb(messageId, db);
 
-      // Send to user
+      // 5. Deliver directly to user
       await deliverOtpBox(boundUser, extractedOtp, toEmail, verifyLink);
 
-      // Log in channel
+      // 6. DB Channel Log
       if (DB_CHANNEL_ID) {
         await sendMsg(
           DB_CHANNEL_ID, 
-          `🔔 *[REAL OTP CAPTURED]*\n📧 Recipient: \`${toEmail}\`\n👤 User: \`${boundUser}\`\n🔑 OTP: \`${extractedOtp || "Link Only"}\``
+          `🔔 *[META OTP CAPTURED]*\n📧 Email: \`${toEmail}\`\n👤 User: \`${boundUser}\`\n🔑 OTP: \`${extractedOtp || "Link Only"}\``
         );
       }
 
     } catch (err) {
-      console.error("Email Error:", err);
+      console.error("Email Parsing Error:", err);
     }
   }
 };
 
-// --- REAL OTP PARSER (ELIMINATES CSS COLOR BUG) ---
-function extractRealOtp(subject, rawBody) {
-  // 1. Instagram/Meta Subject Line Check (Sabse accurate)
-  // Example: "145892 is your Instagram code" ya "592 104 is your code"
+// --- META AI & INSTAGRAM OTP EXTRACTOR ---
+function extractMetaAiOtp(subject, rawBody) {
+  // 1. Decode Quoted-Printable Email content
+  let body = rawBody
+    .replace(/=\r?\n/g, "")
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+  // 2. Priority Check: Subject Line (Sabse accurate)
   if (subject) {
-    const subjMatch = subject.match(/\b(\d{3})\s?(\d{3})\b/) ||
-                      subject.match(/(?:code|otp|pin|código)[\s:=–-]{1,5}(\d{6,8})/i) ||
-                      subject.match(/(\d{6,8})\s+(?:is your|ka code|aapka code)/i);
+    const subjMatch = subject.match(/\b(\d{3})\s?(\d{3})\b/) || 
+                      subject.match(/\b(\d{6,8})\b/);
     if (subjMatch) {
-      return (subjMatch[1] && subjMatch[2]) ? (subjMatch[1] + subjMatch[2]) : (subjMatch[1] || subjMatch[0]);
+      const code = subjMatch[0].replace(/\s+/g, "");
+      if (code.length >= 6 && code.length <= 8) return code;
     }
   }
 
-  // 2. Body Cleaning: Remove CSS styles, head, and all #HEX color codes
-  let clean = rawBody
+  // 3. Body Pre-Clean: Strip Head, Styles, and CSS Hex Colors (#141823 etc.)
+  let cleanBody = body
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, " ")
-    .replace(/#[0-9a-fA-F]{6}/g, " ")  // Remove #141823 and any hex color
-    .replace(/#[0-9a-fA-F]{3}/g, " ")
-    .replace(/<[^>]+>/g, " ")          // Strip HTML tags
-    .replace(/&nbsp;/g, " ");
+    .replace(/#[0-9a-fA-F]{6}\b/g, " ")
+    .replace(/#[0-9a-fA-F]{3}\b/g, " ");
 
-  // 3. Match Pattern: "123456 is your Instagram code"
-  const beforePattern = clean.match(/\b(\d{3})\s?(\d{3})\b\s*(?:is your|was requested|aapka code|use this code)/i) ||
-                        clean.match(/\b(\d{6,8})\b\s*(?:is your|was requested|to verify)/i);
-  if (beforePattern) {
-    return beforePattern[2] ? (beforePattern[1] + beforePattern[2]) : (beforePattern[1] || beforePattern[0]);
+  // 4. Meta AI HTML Tag search (Meta AI codes are placed in <div>, <span>, or <td>)
+  const tagMatches = [...cleanBody.matchAll(/>\s*([0-9]{3}\s?[0-9]{3}|[0-9]{6,8})\s*</g)];
+  for (const m of tagMatches) {
+    const code = m[1].replace(/\s+/g, "");
+    if (code.length >= 6 && code.length <= 8 && !code.startsWith("000000")) {
+      return code;
+    }
   }
 
-  // 4. Match Pattern: "code: 123456"
-  const afterPattern = clean.match(/(?:code|otp|pin|passcode|código|verification)[\s:=–-]{1,10}(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)/i);
-  if (afterPattern) {
-    return afterPattern[1].replace(/\s+/g, "");
+  // 5. Clean to Plain Text
+  let plain = cleanBody
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ");
+
+  // 6. Context Patterns for Meta AI & Instagram
+  const patterns = [
+    /(?:code|otp|pin|passcode|código|security code|confirmation code)[\s:=–-]{1,30}(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)/i,
+    /(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)\s*(?:is your|was requested|to verify|aapka code|to log in)/i,
+    /enter\s*(?:the|this)?\s*code\s*[:\s-]{1,30}(\b\d{3}\s?\d{3}\b|\b\d{6,8}\b)/i
+  ];
+
+  for (const pat of patterns) {
+    const match = plain.match(pat);
+    if (match) {
+      const code = (match[1] || match[0]).replace(/\D/g, "");
+      if (code.length >= 6 && code.length <= 8) return code;
+    }
+  }
+
+  // 7. General Fallback for 6-digit standalone code
+  const allNumbers = plain.match(/\b\d{6,8}\b/g);
+  if (allNumbers && allNumbers.length > 0) {
+    for (const n of allNumbers) {
+      if (!n.startsWith("202") && !n.startsWith("17")) { // Exclude year or epoch
+        return n;
+      }
+    }
   }
 
   return null;
 }
 
-// --- TELEGRAM CHANNEL DATABASE ENGINE ---
+// --- STRICT VERIFICATION LINK FILTER (BLOCKS 1x1 PIXELS) ---
+function extractGenuineVerificationLink(raw) {
+  const urls = raw.match(/https?:\/\/[^\s<>"{}|\\^`']+/gi) || [];
+
+  for (let u of urls) {
+    let cleanUrl = u.replace(/&amp;/g, "&");
+
+    // Domain check
+    if (/meta\.com|instagram\.com|facebook\.com/i.test(cleanUrl)) {
+      // 100% Reject tracking pixels and static assets
+      if (/collect|pixel|beacon|logging|tr\?|1x1|static|fbcdn|cdn|help\.|privacy|terms|unsubscribe/i.test(cleanUrl)) {
+        continue;
+      }
+
+      // Must be an actual confirmation or action link
+      if (/confirm|verify|action|checkpoint|\/c\/|token=/i.test(cleanUrl)) {
+        return cleanUrl;
+      }
+    }
+  }
+
+  return null;
+}
+
+// --- TELEGRAM CHANNEL DB ENGINE ---
 async function getChannelDb() {
   const defaultDb = { users: {}, emails: {}, inboxes: {} };
 
@@ -301,7 +361,7 @@ async function generateNewEmail(chatId) {
 
 _(Tap karke copy karein)_
 ━━━━━━━━━━━━━━━━━━━━
-Yeh email Instagram / Meta me dalein. OTP aate hi yahan **turant ek bar** deliver ho jayega.`;
+Yeh email Meta AI / Instagram me dalein. OTP aate hi yahan **turant ek bar** deliver ho jayega.`;
 
   const inlineBtns = [
     [{ text: "🔄 Refresh / Check OTP", callback_data: "btn_check_otp" }],
@@ -311,7 +371,7 @@ Yeh email Instagram / Meta me dalein. OTP aate hi yahan **turant ek bar** delive
   await sendMsg(chatId, messageText, null, { inline_keyboard: inlineBtns });
 }
 
-// --- CHECK OTP / REFRESH BUTTON ---
+// --- CHECK OTP MANUAL REFRESH ---
 async function checkCurrentOtp(chatId) {
   const { db } = await getChannelDb();
   const currentEmail = db.users ? db.users[chatId] : null;
@@ -328,7 +388,7 @@ async function checkCurrentOtp(chatId) {
   } else {
     await sendMsg(
       chatId, 
-      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nInstagram se OTP send karein. Aate hi yahan display ho jayega.`,
+      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nMeta AI ya Instagram se OTP send karein. Aate hi yahan show ho jayega.`,
       null,
       { inline_keyboard: [[{ text: "🔄 Refresh Status", callback_data: "btn_check_otp" }]] }
     );
@@ -340,7 +400,7 @@ async function handleOldHubPrompt(chatId) {
   USER_STATE.set(chatId, "awaiting_old_email");
   await sendMsg(
     chatId, 
-    "🔑 *Old Email Hub*\n\nApna purana email address yahan chat me paste karein:\n\n_Example:_\n`anjali.saxena842@vibepulsemedia.online`\n\nIs email par aane wala OTP seedhe aapko milega."
+    "🔑 *Old Email Hub*\n\nApna purana email address yahan chat me bhejein:\n\n_Example:_\n`anjali.saxena842@vibepulsemedia.online`\n\nIs email ka OTP direct aapko receive hoga."
   );
 }
 
@@ -349,7 +409,7 @@ async function linkAndCheckOldEmail(chatId, inputEmail) {
   const cleanEmail = inputEmail.toLowerCase().trim();
 
   if (!cleanEmail.endsWith(`@${DOMAIN}`)) {
-    await sendMsg(chatId, `⚠️ Invalid Domain! Email \`@${DOMAIN}\` par hi khatam hona chahiye.`);
+    await sendMsg(chatId, `⚠️ Invalid Domain! Email \`@${DOMAIN}\` par khatam hona chahiye.`);
     return;
   }
 
@@ -371,14 +431,14 @@ async function linkAndCheckOldEmail(chatId, inputEmail) {
   } else {
     await sendMsg(
       chatId, 
-      `✅ *Email Successfully Linked!*\n\nTarget Email: \`${cleanEmail}\`\n\n📡 *Status:* Yeh email aapke bot se link ho gaya hai. Ab aap Instagram me 'Resend OTP' karein, naya OTP seedhe yahan aayega.`,
+      `✅ *Email Successfully Linked!*\n\nTarget Email: \`${cleanEmail}\`\n\n📡 *Status:* Yeh email aapke bot se link ho gaya hai. Ab aap Meta AI me jakar 'Resend Code' karein, OTP turant yahan aayega.`,
       null,
       { inline_keyboard: [[{ text: "🔄 Check / Refresh OTP", callback_data: "btn_check_otp" }]] }
     );
   }
 }
 
-// --- OTP BOX DISPLAY ---
+// --- DELIVER OTP CARD ---
 async function deliverOtpBox(chatId, otp, toEmail, link) {
   let text = "";
   if (otp) {
@@ -414,7 +474,7 @@ _(Tap code to copy)_
   await sendMsg(chatId, text, null, { inline_keyboard: inlineBtns });
 }
 
-// --- TELEGRAM CALLER ---
+// --- TELEGRAM SENDER ---
 async function sendMsg(chatId, text, replyKeyboard = null, inlineKeyboard = null) {
   const payload = {
     chat_id: chatId,

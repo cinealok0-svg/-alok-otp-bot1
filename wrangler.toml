@@ -1,4 +1,4 @@
-name = "smt-tempmail-backend"
+name = "alokmail-bot"
 main = "worker.js"
 compatibility_date = "2024-09-01"
 
@@ -10,4 +10,4 @@ DEFAULT_DOMAIN = "vibepulsemedia.online"
 
 [[r2_buckets]]
 binding = "MAIL_BUCKET"
-bucket_name = "tempmail-bucket"
+bucket_name = "यहाँ R2 का exact नाम"

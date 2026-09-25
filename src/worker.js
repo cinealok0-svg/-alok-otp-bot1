@@ -1,821 +1,2335 @@
 /**
- * Professional Meta AI & Instagram Temp Mail Engine (100% Button-Driven)
- * Features:
- * - Touch-Based Admin Dashboard (Add/Del Admin, List, Broadcast via Buttons)
- * - Strict 6-Digit Meta/Instagram OTP Filter (No more tracking ID bugs)
- * - R2 Storage Integration for Full HTML Email Viewer
- * - Strict Role Protection (Old Email Hub only for Owner/Admins)
- * - Custom Gmail Creation Feature (Manual & Button Driven)
- * - Last 3 OTPs History & Anti-Spam Cooldown
+ * ============================================================
+ * TELEGRAM TEST MAIL + OTP PANEL
+ * Cloudflare Workers
+ * Database: Telegram Channel pinned JSON message
+ * KV: NOT USED
+ * ============================================================
+ *
+ * IMPORTANT:
+ * 1. Bot must be ADMIN of DB channel.
+ * 2. DB channel should have a pinned JSON database message.
+ * 3. Replace all PUT_... placeholders below.
+ * 4. This system handles ONLY application-generated TEST OTPs.
+ *    It does not intercept Instagram/Meta/third-party OTPs.
+ * ============================================================
  */
 
 const BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA";
 const PRIMARY_OWNER_ID = "8452322818"; // Main Super Owner
 const DB_CHANNEL_ID = "-1004474665956";
-const DOMAIN = "vibepulsemedia.online";
+const DOMAIN = "vibepulsemedia.online"
+/* =========================
+   LIMITS
+========================= */
 
-// Strict Whitelist Senders (Sirf Meta Platforms)
-const ALLOWED_SENDERS = [
-  "facebookmail.com",
-  "instagram.com",
-  "mail.instagram.com",
-  "meta.com"
+const MAX_USERS = 5000;
+const MAX_ADMINS = 50;
+const MAX_EMAILS_PER_USER = 20;
+const MAX_OTP_HISTORY = 10;
+const MAX_AUDIT_LOGS = 200;
+const MAX_BROADCAST_USERS = 5000;
+
+const USER_COOLDOWN_MS = 20 * 1000;
+const OTP_EXPIRE_MS = 10 * 60 * 1000;
+
+/* =========================
+   RUNTIME STATE
+========================= */
+
+const runtimeCooldown = new Map();
+const runtimeLocks = new Map();
+
+/* =========================
+   FEMALE TEST NAMES
+========================= */
+
+const FEMALE_FIRST_NAMES = [
+  "Aarohi",
+  "Aanya",
+  "Anaya",
+  "Diya",
+  "Isha",
+  "Kiara",
+  "Kavya",
+  "Meera",
+  "Naina",
+  "Riya",
+  "Sana",
+  "Sara",
+  "Tanya",
+  "Vanya",
+  "Zoya",
+  "Maya",
+  "Anika",
+  "Avni",
+  "Myra",
+  "Navya",
+  "Pihu",
+  "Rhea",
+  "Simran",
+  "Tara",
+  "Aisha"
 ];
 
-let USER_STATE = new Map();
-let USER_COOLDOWN = new Map();
-
-const FEMALE_NAMES = [
-  "priya", "ananya", "sneha", "pooja", "neha", "riya", "simran", "kajal",
-  "khushi", "aditi", "shreya", "tanvi", "mansi", "divya", "muskan", "aarushi",
-  "ishika", "sakshi", "pallavi", "swati", "anjali", "kriti", "megha", "komal",
-  "sonam", "preeti", "jyoti", "rekha", "payal", "varsha", "shikha", "nisha"
+const FEMALE_LAST_NAMES = [
+  "Sharma",
+  "Verma",
+  "Singh",
+  "Kapoor",
+  "Mehta",
+  "Malhotra",
+  "Patel",
+  "Khan",
+  "Joshi",
+  "Agarwal",
+  "Gupta",
+  "Chopra",
+  "Bhatia",
+  "Arora",
+  "Sethi",
+  "Rao",
+  "Shah",
+  "Khanna",
+  "Mishra",
+  "Iyer"
 ];
 
-const SURNAMES = [
-  "sharma", "verma", "singh", "patel", "kumar", "yadav", "gupta", "mishra",
-  "tiwari", "pandey", "chauhan", "joshi", "jha", "mehta", "das", "dubey", "reddy", "bose", "saxena"
-];
+/* =========================
+   DEFAULT DATABASE
+========================= */
 
-export default {
-  // --- 1. HTTP REQUEST / WEBHOOK & WEB VIEWER ROUTER ---
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-
-    // [R2 Storage HTML Web Viewer]
-    if (url.pathname === "/view") {
-      const emailKey = (url.searchParams.get("id") || "").toLowerCase().trim();
-      if (!emailKey || !env.MAIL_BUCKET) {
-        return new Response("<h3>⚠️ Preview expired or storage not found.</h3>", {
-          status: 404,
-          headers: { "Content-Type": "text/html; charset=utf-8" }
-        });
-      }
-
-      try {
-        const object = await env.MAIL_BUCKET.get(`html_${emailKey}`);
-        if (!object) {
-          return new Response("<h3>⚠️ Email content expired or removed.</h3>", {
-            status: 404,
-            headers: { "Content-Type": "text/html; charset=utf-8" }
-          });
-        }
-        const html = await object.text();
-        return new Response(html, {
-          status: 200,
-          headers: { "Content-Type": "text/html; charset=utf-8" }
-        });
-      } catch (e) {
-        return new Response("<h3>Server Error loading preview.</h3>", { status: 500 });
-      }
-    }
-
-    if (request.method !== "POST") return new Response("Worker Running OK", { status: 200 });
-
-    try {
-      const update = await request.json();
-      const workerOrigin = `${url.protocol}//${url.host}`;
-      const { messageId, db } = await getChannelDb();
-
-      // ========================================================
-      // --- INLINE BUTTON CALLBACK HANDLER ---
-      // ========================================================
-      if (update.callback_query) {
-        const q = update.callback_query;
-        const chatId = q.message.chat.id.toString();
-        const msgId = q.message.message_id;
-        const data = q.data;
-        const isOwner = (chatId === PRIMARY_OWNER_ID);
-        const userIsAdmin = checkIsAdmin(chatId, db);
-
-        // --- Standard Feature Buttons ---
-        if (data === "btn_gen") {
-          await handleEmailGenRequest(chatId, workerOrigin, db, messageId);
-        } else if (data === "btn_custom") {
-          await handleCustomNamePrompt(chatId);
-        } else if (data === "btn_check_otp") {
-          await checkCurrentOtp(chatId, workerOrigin, db);
-        } else if (data === "btn_old_hub") {
-          if (userIsAdmin) {
-            await handleOldHubPrompt(chatId);
-          } else {
-            await sendMsg(chatId, "⛔ *Access Denied:* Purana email access sirf Admins ke liye hai.");
-          }
-        }
-
-        // --- Admin Dashboard Buttons ---
-        else if (data === "adm_menu") {
-          if (userIsAdmin) {
-            await openAdminDashboard(chatId, msgId, isOwner, db);
-          }
-        } else if (data === "adm_add") {
-          if (isOwner) {
-            USER_STATE.set(chatId, "awaiting_add_admin");
-            await editMsg(chatId, msgId, "➕ *Add Admin:*\n\nApne dost ki Telegram *Chat ID* chat me bhejein:\n\n_(Dost bot ko /id bhejkar apni ID jaan sakta hai)_", [
-              [{ text: "🔙 Cancel", callback_data: "adm_menu" }]
-            ]);
-          } else {
-            await sendMsg(chatId, "⛔ Sirf Main Owner naye Admin add kar sakta hai.");
-          }
-        } else if (data === "adm_del_list") {
-          if (isOwner) {
-            await showRemoveAdminButtons(chatId, msgId, db);
-          } else {
-            await sendMsg(chatId, "⛔ Sirf Main Owner Admin remove kar sakta hai.");
-          }
-        } else if (data.startsWith("adm_remove_")) {
-          if (isOwner) {
-            const targetId = data.replace("adm_remove_", "");
-            db.admins = (db.admins || []).filter(id => id !== targetId);
-            await saveChannelDb(messageId, db);
-            await sendMsg(chatId, `❌ Chat ID \`${targetId}\` ko Admin se hata diya gaya.`);
-            await openAdminDashboard(chatId, msgId, isOwner, db);
-          }
-        } else if (data === "adm_list") {
-          if (userIsAdmin) {
-            const list = (db.admins && db.admins.length > 0)
-              ? db.admins.map((id, i) => `${i + 1}. \`${id}\``).join("\n")
-              : "_Koi Sub-Admin nahi hai._";
-            await editMsg(chatId, msgId, `🛡️ *Authorized Admins List:*\n\n👑 *Owner:* \`${PRIMARY_OWNER_ID}\`\n\n${list}`, [
-              [{ text: "🔙 Back to Dashboard", callback_data: "adm_menu" }]
-            ]);
-          }
-        } else if (data === "adm_stats") {
-          if (userIsAdmin) {
-            const userCount = Object.keys(db.users || {}).length;
-            const inboxCount = Object.keys(db.inboxes || {}).length;
-            const adminCount = (db.admins || []).length;
-            await editMsg(chatId, msgId, `📊 *Live System Stats:*\n\n👥 Total Linked Users: *${userCount}*\n📬 Active Inboxes Cached: *${inboxCount}*\n🛡️ Total Sub-Admins: *${adminCount}*\n🌐 Active Domain: \`${DOMAIN}\``, [
-              [{ text: "🔙 Back to Dashboard", callback_data: "adm_menu" }]
-            ]);
-          }
-        } else if (data === "adm_broadcast") {
-          if (isOwner) {
-            USER_STATE.set(chatId, "awaiting_broadcast_text");
-            await editMsg(chatId, msgId, "📢 *Broadcast Message:*\n\nJo message sabhi bot users ko bhejni hai, use yahan chat me type karke send karein:", [
-              [{ text: "🔙 Cancel", callback_data: "adm_menu" }]
-            ]);
-          }
-        } else if (data === "adm_close") {
-          await deleteMsg(chatId, msgId);
-        }
-
-        return new Response(JSON.stringify({
-          method: "answerCallbackQuery",
-          callback_query_id: q.id
-        }), { headers: { "Content-Type": "application/json" } });
-      }
-
-      // ========================================================
-      // --- CHAT MESSAGES & BUTTON ACTIONS ---
-      // ========================================================
-      if (update.message) {
-        const msg = update.message;
-        const chatId = msg.chat.id.toString();
-        const text = (msg.text || "").trim();
-        const isOwner = (chatId === PRIMARY_OWNER_ID);
-        const userIsAdmin = checkIsAdmin(chatId, db);
-
-        // Fast Action: /id ya "🆔 My Chat ID" button
-        if (text === "/id" || text === "🆔 My Chat ID") {
-          await sendMsg(chatId, `👤 *Aapki Telegram Chat ID Hai:*\n\n\`${chatId}\`\n\n_(Tap karke copy karein)_`);
-          return new Response("OK");
-        }
-
-        // State 1: Adding Admin via Button
-        if (USER_STATE.get(chatId) === "awaiting_add_admin") {
-          USER_STATE.delete(chatId);
-          const targetId = text.trim();
-          if (!/^\d+$/.test(targetId)) {
-            await sendMsg(chatId, "⚠️ Galat ID format! Sirf numbers hone chahiye.");
-            return new Response("OK");
-          }
-          if (!db.admins) db.admins = [];
-          if (!db.admins.includes(targetId)) {
-            db.admins.push(targetId);
-            await saveChannelDb(messageId, db);
-            await sendMsg(chatId, `✅ Chat ID \`${targetId}\` ko Admin bana diya gaya!`);
-            await sendMsg(targetId, "🎉 *Badhaai Ho!* Aapko is bot ka Admin bana diya gaya hai.");
-          } else {
-            await sendMsg(chatId, `⚠️ Yeh ID \`${targetId}\` pehle se Admin hai.`);
-          }
-          return new Response("OK");
-        }
-
-        // State 2: Broadcast via Button
-        if (USER_STATE.get(chatId) === "awaiting_broadcast_text") {
-          USER_STATE.delete(chatId);
-          const usersList = Object.keys(db.users || {});
-          let sentCount = 0;
-          await sendMsg(chatId, `⏳ Broadcast shuru ho raha hai (*${usersList.length} users* ko)...`);
-          for (const uid of usersList) {
-            try {
-              await sendMsg(uid, `📢 *Announcement:*\n\n${text}`);
-              sentCount++;
-            } catch (e) {}
-          }
-          await sendMsg(chatId, `✅ Broadcast complete! Total *${sentCount}* users ko message deliver hua.`);
-          return new Response("OK");
-        }
-
-        // State 3: Custom Username Creation
-        if (USER_STATE.get(chatId) === "awaiting_custom_name") {
-          USER_STATE.delete(chatId);
-          await processCustomEmailCreation(chatId, text, workerOrigin, db, messageId);
-          return new Response("OK");
-        }
-
-        // State 4: Old Email Binding (Only Admin)
-        if (USER_STATE.get(chatId) === "awaiting_old_email") {
-          USER_STATE.delete(chatId);
-          if (userIsAdmin) {
-            await linkAndCheckOldEmail(chatId, text, workerOrigin, db, messageId);
-          } else {
-            await sendMsg(chatId, "⛔ *Access Denied:* Purana email access karne ki anumati aapko nahi hai.");
-          }
-          return new Response("OK");
-        }
-
-        // Direct Email Paste Check
-        if (text.toLowerCase().includes(`@${DOMAIN}`)) {
-          if (userIsAdmin) {
-            await linkAndCheckOldEmail(chatId, text, workerOrigin, db, messageId);
-          } else {
-            await sendMsg(chatId, "⚠️ Aap purana email yahan link nahi kar sakte. Naya email lene ke liye buttons ka upyog karein.");
-          }
-          return new Response("OK");
-        }
-
-        // --- Bottom Keyboard Menu Actions ---
-        if (text === "/start") {
-          USER_STATE.delete(chatId);
-          const replyKeyboard = getReplyKeyboard(userIsAdmin);
-          const roleBadge = isOwner ? "👑 *Owner Mode*" : (userIsAdmin ? "🛡️ *Admin Mode*" : "👤 *User Mode*");
-
-          await sendMsg(chatId, 
-            `👋 *Meta AI & Instagram Temp Mail Hub*\n\nStatus: ${roleBadge}\n\nNiche diye gaye buttons se naya email create karein ya custom Gmail banayein:`, 
-            replyKeyboard
-          );
-        }
-        else if (text === "⚡ Generate Email" || text === "⚡ Random Email" || text === "/gen") {
-          await handleEmailGenRequest(chatId, workerOrigin, db, messageId);
-        }
-        else if (text === "✏️ Custom Gmail" || text === "✏️ Custom Email" || text === "/custom") {
-          await handleCustomNamePrompt(chatId);
-        }
-        else if (text === "📬 Check OTP" || text === "/otp") {
-          await checkCurrentOtp(chatId, workerOrigin, db);
-        }
-        else if (text === "🔑 Old Email Hub" || text === "/old") {
-          if (userIsAdmin) {
-            await handleOldHubPrompt(chatId);
-          } else {
-            await sendMsg(chatId, "⛔ *Access Denied:* Yeh button sirf Authorized Admins ke liye hai.");
-          }
-        }
-        else if (text === "⚙️ Admin Dashboard" || text === "/admin") {
-          if (userIsAdmin) {
-            await openAdminDashboard(chatId, null, isOwner, db);
-          } else {
-            await sendMsg(chatId, "⛔ *Access Denied.*");
-          }
-        }
-
-        return new Response("OK", { status: 200 });
-      }
-
-      return new Response("OK", { status: 200 });
-    } catch (e) {
-      return new Response("OK", { status: 200 });
-    }
-  },
-
-  // --- 2. CLOUDFLARE EMAIL ROUTING RECEIVER ---
-  async email(message, env, ctx) {
-    try {
-      const rawFrom = (message.from || "").toLowerCase();
-      const rawTo = (message.to || "").toLowerCase();
-      const emailMatch = rawTo.match(/[\w.+%-]+@[\w.-]+\.[a-zA-Z]{2,}/);
-      const toEmail = emailMatch ? emailMatch[0].trim() : rawTo.trim();
-
-      // 1. Strict Sender Verification (Only Meta Platforms Allowed)
-      const isAllowedSender = ALLOWED_SENDERS.some(senderDomain => {
-        return rawFrom.endsWith(`@${senderDomain}`) || rawFrom.includes(`@${senderDomain}>`) || rawFrom.includes(senderDomain);
-      });
-
-      if (!isAllowedSender) return; // Non-Meta mails dropped immediately
-
-      const raw = await new Response(message.raw).text();
-      const subject = message.headers.get("subject") || "";
-
-      // 2. Strict 6-Digit OTP Extraction
-      const extractedOtp = extractMetaAiOtp(subject, raw);
-      const verifyLink = extractGenuineVerificationLink(raw);
-
-      if (!extractedOtp && !verifyLink) return;
-
-      const { messageId, db } = await getChannelDb();
-      const boundUser = db.emails ? db.emails[toEmail] : null;
-
-      // 3. Strict Deduplication Lock
-      const currentToken = extractedOtp || verifyLink;
-      const prevRecord = db.inboxes ? db.inboxes[toEmail] : null;
-      const now = Date.now();
-
-      if (prevRecord && prevRecord.tok === currentToken && (now - (prevRecord.ts || 0) < 300000)) {
-        return;
-      }
-
-      // 4. Update History (Last 3 OTPs)
-      let history = (prevRecord && Array.isArray(prevRecord.hist)) ? prevRecord.hist : [];
-      if (extractedOtp) {
-        history.unshift({
-          otp: extractedOtp,
-          time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: '2-digit', minute: '2-digit' })
-        });
-        if (history.length > 3) history = history.slice(0, 3);
-      }
-
-      // 5. Store Full HTML in R2 Storage
-      const previewKey = `${toEmail.replace(/[^a-z0-9]/g, "_")}`;
-      if (env.MAIL_BUCKET) {
-        await env.MAIL_BUCKET.put(`html_${previewKey}`, raw, {
-          httpMetadata: { contentType: "text/html; charset=utf-8" }
-        });
-      }
-
-      // 6. Compact DB Record Save
-      if (!db.inboxes) db.inboxes = {};
-      db.inboxes[toEmail] = {
-        otp: extractedOtp,
-        lnk: verifyLink,
-        tok: currentToken,
-        ts: now,
-        hist: history,
-        hasHtml: true
-      };
-
-      await saveChannelDb(messageId, db);
-
-      // 7. Deliver directly to Bound User
-      if (boundUser) {
-        const workerOrigin = `https://${DOMAIN}`;
-        const userIsAdmin = checkIsAdmin(boundUser, db);
-        await deliverOtpBox(boundUser, extractedOtp, toEmail, verifyLink, history, previewKey, workerOrigin, userIsAdmin);
-      }
-
-      // 8. DB Channel Audit Notification
-      if (DB_CHANNEL_ID) {
-        await sendMsg(
-          DB_CHANNEL_ID, 
-          `🔔 *[META OTP CAPTURED]*\n📧 Email: \`${toEmail}\`\n👤 Recipient: \`${boundUser || "Unbound"}\`\n🔑 OTP: \`${extractedOtp || "Link Only"}\``
-        );
-      }
-
-    } catch (err) {
-      console.error("Email Parsing Error:", err);
-    }
-  }
-};
-
-// --- OTP & LINK EXTRACTORS ---
-function extractMetaAiOtp(subject, rawBody) {
-  let body = rawBody
-    .replace(/=\r?\n/g, "")
-    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-
-  if (subject) {
-    const subjMatch = subject.match(/\b(\d{3})\s?(\d{3})\b/) || subject.match(/\b(\d{6})\b/);
-    if (subjMatch) {
-      const code = subjMatch[0].replace(/\s+/g, "");
-      if (code.length === 6 && !code.startsWith("000000")) return code;
-    }
-  }
-
-  let cleanBody = body
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, " ")
-    .replace(/#[0-9a-fA-F]{6}\b/g, " ")
-    .replace(/#[0-9a-fA-F]{3}\b/g, " ");
-
-  const tagMatches = [...cleanBody.matchAll(/>\s*([0-9]{3}\s?[0-9]{3}|[0-9]{6})\s*</g)];
-  for (const m of tagMatches) {
-    const code = m[1].replace(/\s+/g, "");
-    if (code.length === 6 && !code.startsWith("000000")) return code;
-  }
-
-  let plain = cleanBody.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
-  const patterns = [
-    /(?:security code|confirmation code|código|verification code|login code)[\s:=–\-#]{1,25}(\b\d{3}\s?\d{3}\b|\b\d{6}\b)/i,
-    /(\b\d{3}\s?\d{3}\b|\b\d{6}\b)\s*(?:is your|was requested|to verify your|aapka code)/i,
-    /enter\s*(?:the|this)?\s*code\s*[:\s-]{1,25}(\b\d{3}\s?\d{3}\b|\b\d{6}\b)/i
-  ];
-
-  for (const pat of patterns) {
-    const match = plain.match(pat);
-    if (match) {
-      const code = (match[1] || match[0]).replace(/\D/g, "");
-      if (code.length === 6 && !code.startsWith("000000")) return code;
-    }
-  }
-
-  return null;
-}
-
-function extractGenuineVerificationLink(raw) {
-  const urls = raw.match(/https?:\/\/[^\s<>"{}|\\^`']+/gi) || [];
-  for (let u of urls) {
-    let cleanUrl = u.replace(/&amp;/g, "&");
-    if (/meta\.com|instagram\.com|facebook\.com/i.test(cleanUrl)) {
-      if (/collect|pixel|beacon|logging|tr\?|1x1|static|fbcdn|cdn|help\.|terms/i.test(cleanUrl)) continue;
-      if (/confirm|verify|action|checkpoint|\/c\/|token=/i.test(cleanUrl)) return cleanUrl;
-    }
-  }
-  return null;
-}
-
-// --- PERMISSIONS HELPER ---
-function checkIsAdmin(chatId, db) {
-  if (chatId === PRIMARY_OWNER_ID) return true;
-  if (db && Array.isArray(db.admins) && db.admins.includes(chatId)) return true;
-  return false;
-}
-
-function getReplyKeyboard(isAdmin) {
-  if (isAdmin) {
-    return {
-      keyboard: [
-        [{ text: "⚡ Generate Email" }, { text: "✏️ Custom Gmail" }],
-        [{ text: "📬 Check OTP" }, { text: "🔑 Old Email Hub" }],
-        [{ text: "🆔 My Chat ID" }]
-      ],
-      resize_keyboard: true,
-      is_persistent: true
-    };
-  }
+function createDefaultDB() {
   return {
-    keyboard: [
-      [{ text: "⚡ Generate Email" }, { text: "✏️ Custom Gmail" }],
-      [{ text: "📬 Check OTP" }, { text: "🆔 My Chat ID" }]
+    version: 1,
+
+    settings: {
+      domain: DEFAULT_DOMAIN,
+      bot_enabled: true,
+      maintenance: false
+    },
+
+    admins: [
+      String(OWNER_ID)
     ],
-    resize_keyboard: true,
-    is_persistent: true
+
+    users: {},
+
+    emails: {},
+
+    test_inboxes: {},
+
+    audit_logs: [],
+
+    stats: {
+      generated_emails: 0,
+      generated_otps: 0,
+      users_created: 0,
+      broadcasts: 0
+    }
   };
 }
 
-// --- TELEGRAM CHANNEL COMPACT DATABASE ---
-async function getChannelDb() {
-  const defaultDb = { admins: [], users: {}, emails: {}, inboxes: {} };
+/* ============================================================
+   CLOUDFLARE ENTRY
+============================================================ */
 
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChat?chat_id=${DB_CHANNEL_ID}`);
-    const data = await res.json();
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
 
-    if (data.ok && data.result.pinned_message) {
+    if (request.method === "GET") {
+      if (url.pathname === "/") {
+        return new Response(
+          "Telegram Test Mail Engine is running.",
+          { status: 200 }
+        );
+      }
+
+      if (url.pathname === "/health") {
+        return Response.json({
+          ok: true,
+          service: "telegram-test-mail-engine",
+          database: "telegram-channel-json"
+        });
+      }
+
+      return new Response("Not Found", { status: 404 });
+    }
+
+    if (request.method === "POST" && url.pathname === "/telegram/webhook") {
+      const secret =
+        request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+
+      if (WEBHOOK_SECRET !== "PUT_RANDOM_WEBHOOK_SECRET_HERE") {
+        if (secret !== WEBHOOK_SECRET) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+      }
+
+      let update;
+
       try {
-        const parsed = JSON.parse(data.result.pinned_message.text);
-        return { 
-          messageId: data.result.pinned_message.message_id, 
-          db: { 
-            admins: parsed.admins || [], 
-            users: parsed.users || {}, 
-            emails: parsed.emails || {}, 
-            inboxes: parsed.inboxes || {} 
-          } 
-        };
-      } catch (err) {}
+        update = await request.json();
+      } catch {
+        return new Response("Invalid JSON", { status: 400 });
+      }
+
+      ctx.waitUntil(handleTelegramUpdate(update));
+
+      return new Response("OK");
     }
 
-    const initRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: DB_CHANNEL_ID, text: JSON.stringify(defaultDb) })
-    });
-    const initData = await initRes.json();
-
-    if (initData.ok) {
-      const newMsgId = initData.result.message_id;
-      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: DB_CHANNEL_ID, message_id: newMsgId, disable_notification: true })
-      });
-      return { messageId: newMsgId, db: defaultDb };
-    }
-  } catch (e) {}
-
-  return { messageId: null, db: defaultDb };
-}
-
-async function saveChannelDb(messageId, db) {
-  if (!messageId) return;
-
-  const inboxKeys = Object.keys(db.inboxes || {});
-  if (inboxKeys.length > 15) {
-    const removeCount = inboxKeys.length - 15;
-    for (let i = 0; i < removeCount; i++) delete db.inboxes[inboxKeys[i]];
+    return new Response("Not Found", { status: 404 });
   }
+};
 
-  const emailKeys = Object.keys(db.emails || {});
-  if (emailKeys.length > 30) {
-    const removeCount = emailKeys.length - 30;
-    for (let i = 0; i < removeCount; i++) delete db.emails[emailKeys[i]];
-  }
+/* ============================================================
+   TELEGRAM UPDATE ROUTER
+============================================================ */
 
+async function handleTelegramUpdate(update) {
   try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: DB_CHANNEL_ID,
-        message_id: messageId,
-        text: JSON.stringify(db)
-      })
-    });
-  } catch (e) {}
-}
+    if (update.message) {
+      await handleMessage(update.message);
+      return;
+    }
 
-// --- ADMIN DASHBOARD UI CONTROLLER ---
-async function openAdminDashboard(chatId, msgId = null, isOwner = false, db = {}) {
-  let inlineBtns = [];
-
-  if (isOwner) {
-    inlineBtns.push([
-      { text: "➕ Add Admin", callback_data: "adm_add" },
-      { text: "➖ Remove Admin", callback_data: "adm_del_list" }
-    ]);
-    inlineBtns.push([
-      { text: "📢 Send Broadcast", callback_data: "adm_broadcast" }
-    ]);
-  }
-
-  inlineBtns.push([
-    { text: "📋 View Admins", callback_data: "adm_list" },
-    { text: "📊 Bot Stats", callback_data: "adm_stats" }
-  ]);
-  inlineBtns.push([
-    { text: "❌ Close Panel", callback_data: "adm_close" }
-  ]);
-
-  const panelText = `⚙️ *Admin Control Dashboard*\n\nOwner: \`${PRIMARY_OWNER_ID}\`\n\nNiche diye gaye buttons se bot manage karein:`;
-
-  if (msgId) {
-    await editMsg(chatId, msgId, panelText, inlineBtns);
-  } else {
-    await sendMsg(chatId, panelText, null, { inline_keyboard: inlineBtns });
+    if (update.callback_query) {
+      await handleCallback(update.callback_query);
+      return;
+    }
+  } catch (err) {
+    console.error("Update error:", err);
   }
 }
 
-async function showRemoveAdminButtons(chatId, msgId, db) {
-  const admins = db.admins || [];
-  if (admins.length === 0) {
-    await editMsg(chatId, msgId, "⚠️ Koi sub-admin add nahi hai jise remove kiya ja sake.", [
-      [{ text: "🔙 Back", callback_data: "adm_menu" }]
-    ]);
+/* ============================================================
+   MESSAGE HANDLER
+============================================================ */
+
+async function handleMessage(message) {
+  const chatId = message.chat?.id;
+  const userId = message.from?.id;
+
+  if (!chatId || !userId) return;
+
+  const text = String(message.text || "").trim();
+
+  const db = await loadDB();
+
+  await ensureUser(db, message.from);
+
+  if (text === "/start") {
+    await saveDB(db);
+
+    await sendMainMenu(chatId, message.from);
     return;
   }
 
-  let buttons = admins.map(id => ([{ text: `❌ Remove ${id}`, callback_data: `adm_remove_${id}` }]));
-  buttons.push([{ text: "🔙 Cancel", callback_data: "adm_menu" }]);
+  if (text === "/admin") {
+    if (!isAdmin(db, userId)) {
+      await sendText(chatId, "❌ Admin access required.");
+      return;
+    }
 
-  await editMsg(chatId, msgId, "🗑️ *Kis Admin Ko Remove Karna Hai?*\nNiche ID par click karein:", buttons);
-}
-
-// --- USER GENERATION & OTP HANDLERS ---
-async function handleEmailGenRequest(chatId, workerOrigin, db, messageId) {
-  const lastCall = USER_COOLDOWN.get(chatId) || 0;
-  const now = Date.now();
-  if (now - lastCall < 15000) {
-    const remaining = Math.ceil((15000 - (now - lastCall)) / 1000);
-    await sendMsg(chatId, `⏳ *Cooldown:* Kripya *${remaining} second* rukiye.`);
+    await sendAdminPanel(chatId);
     return;
   }
-  USER_COOLDOWN.set(chatId, now);
 
-  const first = FEMALE_NAMES[(Math.random() * FEMALE_NAMES.length) | 0];
-  const last = SURNAMES[(Math.random() * SURNAMES.length) | 0];
-  const num = ((Math.random() * 900) | 0) + 100;
-  const newEmail = `${first}.${last}${num}@${DOMAIN}`.toLowerCase();
+  if (text === "/help") {
+    await sendHelp(chatId);
+    return;
+  }
 
-  db.users[chatId] = newEmail;
-  db.emails[newEmail] = chatId;
-  await saveChannelDb(messageId, db);
+  if (text.startsWith("/")) {
+    await sendMainMenu(chatId, message.from);
+    return;
+  }
 
-  const userIsAdmin = checkIsAdmin(chatId, db);
-  const msgText = 
-`✨ *Aapka Naya Temp Email:*
+  await sendMainMenu(chatId, message.from);
+}
 
-\`${newEmail}\`
+/* ============================================================
+   CALLBACK HANDLER
+============================================================ */
 
-_(Tap karke copy karein)_
-━━━━━━━━━━━━━━━━━━━━
-Ise Meta AI ya Instagram me enter karein. OTP aate hi bot yahan **instant deliver** karega.`;
+async function handleCallback(query) {
+  const userId = query.from.id;
+  const chatId = query.message?.chat?.id;
 
-  const inlineBtns = [
-    [{ text: "🔄 Refresh / Check OTP", callback_data: "btn_check_otp" }],
-    [{ text: "✏️ Custom Gmail", callback_data: "btn_custom" }]
+  if (!chatId) return;
+
+  await answerCallback(query.id);
+
+  const data = String(query.data || "");
+
+  const db = await loadDB();
+
+  await ensureUser(db, query.from);
+
+  /* ---------- USER ---------- */
+
+  if (data === "home") {
+    await saveDB(db);
+    await sendMainMenu(chatId, query.from);
+    return;
+  }
+
+  if (data === "generate_email") {
+    await generateTestEmail(db, chatId, userId);
+    return;
+  }
+
+  if (data === "custom_email") {
+    await requestCustomEmail(chatId);
+    return;
+  }
+
+  if (data === "my_emails") {
+    await showMyEmails(db, chatId, userId);
+    return;
+  }
+
+  if (data === "my_inbox") {
+    await showMyInbox(db, chatId, userId);
+    return;
+  }
+
+  if (data === "generate_test_otp") {
+    await generateTestOTP(db, chatId, userId);
+    return;
+  }
+
+  if (data === "otp_history") {
+    await showOTPHistory(db, chatId, userId);
+    return;
+  }
+
+  if (data === "my_profile") {
+    await showProfile(db, chatId, userId);
+    return;
+  }
+
+  if (data === "settings") {
+    await showUserSettings(chatId);
+    return;
+  }
+
+  if (data === "help") {
+    await sendHelp(chatId);
+    return;
+  }
+
+  /* ---------- ADMIN ---------- */
+
+  if (data === "admin_panel") {
+    if (!isAdmin(db, userId)) {
+      await sendText(chatId, "❌ Access denied.");
+      return;
+    }
+
+    await sendAdminPanel(chatId);
+    return;
+  }
+
+  if (data === "admin_stats") {
+    if (!isAdmin(db, userId)) return deny(chatId);
+
+    await showAdminStats(db, chatId);
+    return;
+  }
+
+  if (data === "admin_users") {
+    if (!isAdmin(db, userId)) return deny(chatId);
+
+    await showAdminUsers(db, chatId);
+    return;
+  }
+
+  if (data === "admin_list") {
+    if (!isAdmin(db, userId)) return deny(chatId);
+
+    await showAdminList(db, chatId);
+    return;
+  }
+
+  if (data === "admin_domain") {
+    if (!isOwner(db, userId)) return ownerOnly(chatId);
+
+    await showDomainPanel(db, chatId);
+    return;
+  }
+
+  if (data === "admin_add") {
+    if (!isOwner(db, userId)) return ownerOnly(chatId);
+
+    await sendText(
+      chatId,
+      "➕ Add Admin\n\n" +
+      "Use:\n" +
+      "`/addadmin USER_ID`\n\n" +
+      "Example:\n" +
+      "`/addadmin 123456789`"
+    );
+    return;
+  }
+
+  if (data === "admin_remove") {
+    if (!isOwner(db, userId)) return ownerOnly(chatId);
+
+    await sendText(
+      chatId,
+      "➖ Remove Admin\n\n" +
+      "Use:\n" +
+      "`/removeadmin USER_ID`"
+    );
+    return;
+  }
+
+  if (data === "admin_transfer") {
+    if (!isOwner(db, userId)) return ownerOnly(chatId);
+
+    await sendText(
+      chatId,
+      "👑 Transfer Ownership\n\n" +
+      "Use:\n" +
+      "`/transfer USER_ID`\n\n" +
+      "The current owner will remain an admin."
+    );
+    return;
+  }
+
+  if (data === "admin_broadcast") {
+    if (!isAdmin(db, userId)) return deny(chatId);
+
+    await sendText(
+      chatId,
+      "📢 Broadcast\n\n" +
+      "Use:\n" +
+      "`/broadcast YOUR MESSAGE`"
+    );
+    return;
+  }
+
+  if (data === "admin_audit") {
+    if (!isAdmin(db, userId)) return deny(chatId);
+
+    await showAuditLogs(db, chatId);
+    return;
+  }
+
+  if (data === "admin_db") {
+    if (!isOwner(db, userId)) return ownerOnly(chatId);
+
+    await sendText(
+      chatId,
+      "💾 Database\n\n" +
+      "The database is stored in the pinned JSON message of the configured Telegram Channel.\n\n" +
+      "Use `/dbinfo` for database information."
+    );
+    return;
+  }
+
+  /* ---------- COPY EMAIL ---------- */
+
+  if (data.startsWith("copy_email:")) {
+    const emailId = data.split(":")[1];
+
+    const item = db.emails[emailId];
+
+    if (!item || String(item.user_id) !== String(userId)) {
+      await sendText(chatId, "❌ This email does not belong to you.");
+      return;
+    }
+
+    await sendText(
+      chatId,
+      "📋 Email:\n\n`" + escapeMarkdown(item.email) + "`"
+    );
+
+    return;
+  }
+
+  /* ---------- COPY OTP ---------- */
+
+  if (data.startsWith("show_otp:")) {
+    const otpId = data.split(":")[1];
+
+    const inbox = db.test_inboxes[String(userId)] || [];
+
+    const otp = inbox.find(x => x.id === otpId);
+
+    if (!otp) {
+      await sendText(chatId, "❌ OTP not found.");
+      return;
+    }
+
+    if (Date.now() > otp.expires_at) {
+      await sendText(chatId, "⌛ This test OTP has expired.");
+      return;
+    }
+
+    await sendText(
+      chatId,
+      "🔐 Your test OTP\n\n" +
+      "`" + otp.code + "`\n\n" +
+      "⚠️ This is an application-generated TEST OTP."
+    );
+
+    return;
+  }
+
+  /* ---------- CUSTOM DOMAIN ---------- */
+
+  if (data === "domain_default") {
+    if (!isOwner(db, userId)) return ownerOnly(chatId);
+
+    db.settings.domain = DEFAULT_DOMAIN;
+
+    addAudit(
+      db,
+      userId,
+      "domain_reset",
+      DEFAULT_DOMAIN
+    );
+
+    await saveDB(db);
+
+    await sendText(
+      chatId,
+      "✅ Domain reset to:\n`" + escapeMarkdown(DEFAULT_DOMAIN) + "`"
+    );
+
+    return;
+  }
+
+  /* ---------- UNKNOWN ---------- */
+
+  await sendMainMenu(chatId, query.from);
+}
+
+/* ============================================================
+   MAIN MENU
+============================================================ */
+
+async function sendMainMenu(chatId, user) {
+  const db = await loadDB();
+
+  const maintenance = db.settings.maintenance;
+
+  if (maintenance && !isAdmin(db, user.id)) {
+    await sendText(
+      chatId,
+      "🛠️ Maintenance mode is active.\nPlease try again later."
+    );
+    return;
+  }
+
+  const keyboard = [
+    [
+      {
+        text: "📧 Generate Test Email",
+        callback_data: "generate_email"
+      }
+    ],
+    [
+      {
+        text: "✏️ Custom Email",
+        callback_data: "custom_email"
+      },
+      {
+        text: "📥 My Inbox",
+        callback_data: "my_inbox"
+      }
+    ],
+    [
+      {
+        text: "🔢 Generate Test OTP",
+        callback_data: "generate_test_otp"
+      },
+      {
+        text: "🕘 OTP History",
+        callback_data: "otp_history"
+      }
+    ],
+    [
+      {
+        text: "📋 My Emails",
+        callback_data: "my_emails"
+      }
+    ],
+    [
+      {
+        text: "👤 Profile",
+        callback_data: "my_profile"
+      },
+      {
+        text: "⚙️ Settings",
+        callback_data: "settings"
+      }
+    ],
+    [
+      {
+        text: "❓ Help",
+        callback_data: "help"
+      }
+    ]
   ];
 
-  if (userIsAdmin) {
-    inlineBtns.push([{ text: "🔑 Link Old Email (Admin)", callback_data: "btn_old_hub" }]);
+  if (isAdmin(db, user.id)) {
+    keyboard.push([
+      {
+        text: "👑 Admin Panel",
+        callback_data: "admin_panel"
+      }
+    ]);
   }
 
-  await sendMsg(chatId, msgText, null, { inline_keyboard: inlineBtns });
-}
-
-async function handleCustomNamePrompt(chatId) {
-  USER_STATE.set(chatId, "awaiting_custom_name");
-  await sendMsg(
-    chatId, 
-    `✏️ *Custom Gmail Creation*\n\nApna मनपसंद username chat me bhejein (jaise agar aapko **myname@${DOMAIN}** chahiye toh sirf *myname* likhein):\n\n_Example:_ \`karan.raj99\` ya \`sneha_vip\`\n\n*(Sirf a-z, 0-9, dot, underscore allowed hain)*`
+  await sendMessage(
+    chatId,
+    "🌐 *Professional Test Mail Engine*\n\n" +
+    "Welcome, *" +
+    escapeMarkdown(user.first_name || "User") +
+    "*.\n\n" +
+    "Choose an option below.\n\n" +
+    "📌 Domain: `" +
+    escapeMarkdown(db.settings.domain) +
+    "`\n" +
+    "🔐 OTP mode: TEST ONLY",
+    keyboard
   );
 }
 
-async function processCustomEmailCreation(chatId, inputName, workerOrigin, db, messageId) {
-  const cleanPrefix = inputName.replace(/@.*$/, "").toLowerCase().trim();
+/* ============================================================
+   GENERATE TEST EMAIL
+============================================================ */
 
-  if (!/^[a-z0-9._-]{3,30}$/.test(cleanPrefix)) {
-    await sendMsg(chatId, "⚠️ *Invalid Format:* Username 3 se 30 characters ka hona chahiye aur special characters allowed nahi hain.");
+async function generateTestEmail(db, chatId, userId) {
+  if (!checkCooldown(userId)) {
+    await sendText(
+      chatId,
+      "⏳ Please wait a few seconds before generating another address."
+    );
     return;
   }
 
-  const customEmail = `${cleanPrefix}@${DOMAIN}`;
+  const first =
+    randomItem(FEMALE_FIRST_NAMES).toLowerCase();
 
-  if (db.emails && db.emails[customEmail] && db.emails[customEmail] !== chatId) {
-    await sendMsg(chatId, `⛔ *Already Taken:* \`${customEmail}\` kisi aur user ke pass registered hai. Koi dusra naam chunein.`);
-    return;
-  }
+  const last =
+    randomItem(FEMALE_LAST_NAMES).toLowerCase();
 
-  db.users[chatId] = customEmail;
-  db.emails[customEmail] = chatId;
-  await saveChannelDb(messageId, db);
+  const number =
+    Math.floor(100 + Math.random() * 900);
 
-  const userIsAdmin = checkIsAdmin(chatId, db);
-  const msgText = 
-`🎯 *Custom Gmail Activated Successfully!*
+  const localPart =
+    `${first}.${last}${number}`;
 
-\`${customEmail}\`
+  const email =
+    `${localPart}@${db.settings.domain}`;
 
-_(Tap karke copy karein)_
-━━━━━━━━━━━━━━━━━━━━
-Ab is email ko Meta AI ya Instagram me enter karein.`;
+  const emailId =
+    "em_" + randomId();
 
-  const inlineBtns = [
-    [{ text: "🔄 Refresh / Check OTP", callback_data: "btn_check_otp" }]
-  ];
+  db.emails[emailId] = {
+    id: emailId,
+    user_id: String(userId),
+    email,
+    created_at: Date.now(),
+    active: true
+  };
 
-  if (userIsAdmin) {
-    inlineBtns.push([{ text: "🔑 Link Old Email (Admin)", callback_data: "btn_old_hub" }]);
-  }
+  const user = db.users[String(userId)];
 
-  await sendMsg(chatId, msgText, null, { inline_keyboard: inlineBtns });
+  user.email_ids = user.email_ids || [];
+
+  user.email_ids.unshift(emailId);
+
+  user.email_ids =
+    user.email_ids.slice(0, MAX_EMAILS_PER_USER);
+
+  db.stats.generated_emails++;
+
+  addAudit(
+    db,
+    userId,
+    "generate_test_email",
+    email
+  );
+
+  await saveDB(db);
+
+  await sendMessage(
+    chatId,
+    "✅ *Test Email Created*\n\n" +
+    "📧 `" + escapeMarkdown(email) + "`\n\n" +
+    "This address belongs to your test account.\n" +
+    "It does not intercept third-party service mail.",
+    [
+      [
+        {
+          text: "📋 Copy",
+          copy_text: {
+            text: email
+          }
+        }
+      ],
+      [
+        {
+          text: "🔢 Generate Test OTP",
+          callback_data: "generate_test_otp"
+        }
+      ],
+      [
+        {
+          text: "📥 My Inbox",
+          callback_data: "my_inbox"
+        }
+      ],
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
 }
 
-async function checkCurrentOtp(chatId, workerOrigin, db) {
-  const currentEmail = db.users ? db.users[chatId] : null;
+/* ============================================================
+   CUSTOM EMAIL
+============================================================ */
 
-  if (!currentEmail) {
-    await sendMsg(chatId, "⚠️ Pehle *⚡ Generate Email* ya *✏️ Custom Gmail* button dabayein.");
+async function requestCustomEmail(chatId) {
+  await sendText(
+    chatId,
+    "✏️ *Custom Email*\n\n" +
+    "Use this command:\n\n" +
+    "`/custom username`\n\n" +
+    "Example:\n" +
+    "`/custom mytest123`\n\n" +
+    "The domain will be your configured test domain."
+  );
+}
+
+/* ============================================================
+   MY EMAILS
+============================================================ */
+
+async function showMyEmails(db, chatId, userId) {
+  const user = db.users[String(userId)];
+
+  if (!user || !user.email_ids?.length) {
+    await sendMessage(
+      chatId,
+      "📭 You have no test emails yet.",
+      [
+        [
+          {
+            text: "📧 Generate Email",
+            callback_data: "generate_email"
+          }
+        ],
+        [
+          {
+            text: "🏠 Home",
+            callback_data: "home"
+          }
+        ]
+      ]
+    );
+
     return;
   }
 
-  const record = db.inboxes ? db.inboxes[currentEmail] : null;
-  const userIsAdmin = checkIsAdmin(chatId, db);
+  const rows = [];
 
-  if (record && (record.otp || record.lnk)) {
-    const previewKey = currentEmail.replace(/[^a-z0-9]/g, "_");
-    await deliverOtpBox(chatId, record.otp, currentEmail, record.lnk, record.hist || [], previewKey, workerOrigin, userIsAdmin);
+  for (const id of user.email_ids.slice(0, 10)) {
+    const email = db.emails[id];
+
+    if (!email) continue;
+
+    rows.push([
+      {
+        text: "📧 " + email.email,
+        callback_data: "copy_email:" + id
+      }
+    ]);
+  }
+
+  rows.push([
+    {
+      text: "📧 New Email",
+      callback_data: "generate_email"
+    }
+  ]);
+
+  rows.push([
+    {
+      text: "🏠 Home",
+      callback_data: "home"
+    }
+  ]);
+
+  await sendMessage(
+    chatId,
+    "📋 *Your Test Emails*\n\n" +
+    "Tap an address to display it.",
+    rows
+  );
+}
+
+/* ============================================================
+   TEST OTP GENERATION
+============================================================ */
+
+async function generateTestOTP(db, chatId, userId) {
+  if (!checkCooldown(userId)) {
+    await sendText(
+      chatId,
+      "⏳ Please wait before generating another test OTP."
+    );
+    return;
+  }
+
+  const user = db.users[String(userId)];
+
+  if (!user.email_ids?.length) {
+    await sendMessage(
+      chatId,
+      "📧 Create a test email first.",
+      [
+        [
+          {
+            text: "Generate Email",
+            callback_data: "generate_email"
+          }
+        ]
+      ]
+    );
+
+    return;
+  }
+
+  const emailId = user.email_ids[0];
+  const email = db.emails[emailId];
+
+  if (!email) {
+    await sendText(chatId, "❌ Email not found.");
+    return;
+  }
+
+  const code =
+    String(
+      Math.floor(
+        100000 + Math.random() * 900000
+      )
+    );
+
+  const otpId =
+    "otp_" + randomId();
+
+  const otp = {
+    id: otpId,
+    user_id: String(userId),
+    email_id: emailId,
+    email: email.email,
+    code,
+    created_at: Date.now(),
+    expires_at: Date.now() + OTP_EXPIRE_MS
+  };
+
+  if (!db.test_inboxes[String(userId)]) {
+    db.test_inboxes[String(userId)] = [];
+  }
+
+  db.test_inboxes[String(userId)].unshift(otp);
+
+  db.test_inboxes[String(userId)] =
+    db.test_inboxes[String(userId)]
+      .slice(0, MAX_OTP_HISTORY);
+
+  db.stats.generated_otps++;
+
+  addAudit(
+    db,
+    userId,
+    "generate_test_otp",
+    email.email
+  );
+
+  await saveDB(db);
+
+  await sendMessage(
+    chatId,
+    "🔐 *TEST OTP GENERATED*\n\n" +
+    "📧 `" + escapeMarkdown(email.email) + "`\n\n" +
+    "🔢 Code:\n" +
+    "`" + code + "`\n\n" +
+    "⏳ Valid for 10 minutes.\n\n" +
+    "⚠️ This code was generated by this application. " +
+    "It is not an intercepted third-party OTP.",
+    [
+      [
+        {
+          text: "📋 Copy OTP",
+          copy_text: {
+            text: code
+          }
+        }
+      ],
+      [
+        {
+          text: "🕘 History",
+          callback_data: "otp_history"
+        }
+      ],
+      [
+        {
+          text: "📥 Inbox",
+          callback_data: "my_inbox"
+        }
+      ],
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   MY INBOX
+============================================================ */
+
+async function showMyInbox(db, chatId, userId) {
+  const inbox =
+    db.test_inboxes[String(userId)] || [];
+
+  if (!inbox.length) {
+    await sendMessage(
+      chatId,
+      "📭 *Inbox Empty*\n\n" +
+      "Generate a test OTP to create an inbox message.",
+      [
+        [
+          {
+            text: "🔢 Generate Test OTP",
+            callback_data: "generate_test_otp"
+          }
+        ],
+        [
+          {
+            text: "🏠 Home",
+            callback_data: "home"
+          }
+        ]
+      ]
+    );
+
+    return;
+  }
+
+  const latest = inbox[0];
+
+  const expired =
+    Date.now() > latest.expires_at;
+
+  let text =
+    "📥 *Your Test Inbox*\n\n" +
+    "📧 `" +
+    escapeMarkdown(latest.email) +
+    "`\n\n" +
+    "🔢 Latest test message\n" +
+    "🕐 " +
+    formatDate(latest.created_at) +
+    "\n";
+
+  if (expired) {
+    text += "\n⌛ Latest OTP expired.";
   } else {
-    await sendMsg(
-      chatId, 
-      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nMeta/Instagram app se OTP send karein, fir yahan refresh karein.`,
-      null,
-      { inline_keyboard: [[{ text: "🔄 Refresh Status", callback_data: "btn_check_otp" }]] }
+    text += "\n✅ Latest OTP is active.";
+  }
+
+  await sendMessage(
+    chatId,
+    text,
+    [
+      [
+        {
+          text: "👁️ Show Latest OTP",
+          callback_data: "show_otp:" + latest.id
+        }
+      ],
+      [
+        {
+          text: "🕘 OTP History",
+          callback_data: "otp_history"
+        }
+      ],
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   OTP HISTORY
+============================================================ */
+
+async function showOTPHistory(db, chatId, userId) {
+  const inbox =
+    db.test_inboxes[String(userId)] || [];
+
+  if (!inbox.length) {
+    await sendText(chatId, "📭 No test OTP history.");
+    return;
+  }
+
+  const lines = [];
+
+  for (const item of inbox.slice(0, 10)) {
+    const expired =
+      Date.now() > item.expires_at;
+
+    lines.push(
+      "• `" +
+      item.code +
+      "` — " +
+      (expired ? "⌛ expired" : "✅ active") +
+      "\n  " +
+      formatDate(item.created_at)
+    );
+  }
+
+  await sendMessage(
+    chatId,
+    "🕘 *Your Test OTP History*\n\n" +
+    lines.join("\n\n") +
+    "\n\n⚠️ History contains only OTPs generated by this application.",
+    [
+      [
+        {
+          text: "📥 Inbox",
+          callback_data: "my_inbox"
+        }
+      ],
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   PROFILE
+============================================================ */
+
+async function showProfile(db, chatId, userId) {
+  const user = db.users[String(userId)];
+
+  await sendMessage(
+    chatId,
+    "👤 *Your Profile*\n\n" +
+    "🆔 ID: `" + userId + "`\n" +
+    "👤 Name: " +
+    escapeMarkdown(user.first_name || "Unknown") +
+    "\n" +
+    "📅 Joined: " +
+    formatDate(user.created_at) +
+    "\n" +
+    "📧 Emails: " +
+    (user.email_ids?.length || 0) +
+    "\n" +
+    "🔢 Test OTPs: " +
+    ((db.test_inboxes[String(userId)] || []).length),
+    [
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   USER SETTINGS
+============================================================ */
+
+async function showUserSettings(chatId) {
+  await sendMessage(
+    chatId,
+    "⚙️ *Settings*\n\n" +
+    "Your test account uses the domain configured by the owner.\n\n" +
+    "🔐 OTP access:\n" +
+    "Only your own application-generated test OTPs are visible to you.\n\n" +
+    "🛡️ Third-party OTP interception is not enabled.",
+    [
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   HELP
+============================================================ */
+
+async function sendHelp(chatId) {
+  await sendMessage(
+    chatId,
+    "❓ *Help*\n\n" +
+    "📧 Generate Test Email\n" +
+    "Creates a female-name based test address.\n\n" +
+    "✏️ Custom Email\n" +
+    "Creates a custom test address using your configured domain.\n\n" +
+    "🔢 Test OTP\n" +
+    "Creates a six-digit OTP generated by this application.\n\n" +
+    "📥 Inbox\n" +
+    "Shows your own test inbox.\n\n" +
+    "🕘 OTP History\n" +
+    "Shows your own generated test OTP history.\n\n" +
+    "⚠️ This bot does not intercept or retrieve Instagram, Meta, Google, banking, or other third-party verification codes.",
+    [
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   ADMIN PANEL
+============================================================ */
+
+async function sendAdminPanel(chatId) {
+  const db = await loadDB();
+
+  await sendMessage(
+    chatId,
+    "👑 *ADMIN CONTROL PANEL*\n\n" +
+    "Select an operation:",
+    [
+      [
+        {
+          text: "📊 Statistics",
+          callback_data: "admin_stats"
+        },
+        {
+          text: "👥 Users",
+          callback_data: "admin_users"
+        }
+      ],
+      [
+        {
+          text: "🛡️ Admins",
+          callback_data: "admin_list"
+        }
+      ],
+      [
+        {
+          text: "➕ Add Admin",
+          callback_data: "admin_add"
+        },
+        {
+          text: "➖ Remove Admin",
+          callback_data: "admin_remove"
+        }
+      ],
+      [
+        {
+          text: "👑 Transfer Owner",
+          callback_data: "admin_transfer"
+        }
+      ],
+      [
+        {
+          text: "🌐 Custom Domain",
+          callback_data: "admin_domain"
+        }
+      ],
+      [
+        {
+          text: "📢 Broadcast",
+          callback_data: "admin_broadcast"
+        },
+        {
+          text: "📝 Audit Logs",
+          callback_data: "admin_audit"
+        }
+      ],
+      [
+        {
+          text: "💾 Database",
+          callback_data: "admin_db"
+        }
+      ],
+      [
+        {
+          text: "🏠 User Panel",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   ADMIN STATS
+============================================================ */
+
+async function showAdminStats(db, chatId) {
+  const users =
+    Object.keys(db.users).length;
+
+  const emails =
+    Object.keys(db.emails).length;
+
+  const otpCount =
+    Object.values(db.test_inboxes)
+      .reduce(
+        (sum, arr) => sum + arr.length,
+        0
+      );
+
+  await sendMessage(
+    chatId,
+    "📊 *SYSTEM STATISTICS*\n\n" +
+    "👥 Users: `" + users + "`\n" +
+    "📧 Emails: `" + emails + "`\n" +
+    "🔢 Test OTP records: `" + otpCount + "`\n" +
+    "📨 Generated emails: `" +
+    db.stats.generated_emails +
+    "`\n" +
+    "🔐 Generated test OTPs: `" +
+    db.stats.generated_otps +
+    "`\n" +
+    "📢 Broadcasts: `" +
+    db.stats.broadcasts +
+    "`\n\n" +
+    "🌐 Domain: `" +
+    escapeMarkdown(db.settings.domain) +
+    "`",
+    [
+      [
+        {
+          text: "🔄 Refresh",
+          callback_data: "admin_stats"
+        }
+      ],
+      [
+        {
+          text: "👑 Admin Panel",
+          callback_data: "admin_panel"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   ADMIN USERS
+============================================================ */
+
+async function showAdminUsers(db, chatId) {
+  const users =
+    Object.values(db.users);
+
+  if (!users.length) {
+    await sendText(chatId, "No users.");
+    return;
+  }
+
+  const latest =
+    users
+      .sort((a, b) => b.created_at - a.created_at)
+      .slice(0, 20);
+
+  const lines =
+    latest.map(
+      (u, i) =>
+        `${i + 1}. ${u.first_name || "User"} — \`${u.id}\``
+    );
+
+  await sendMessage(
+    chatId,
+    "👥 *Recent Users*\n\n" +
+    lines.join("\n") +
+    "\n\nFor a specific user:\n" +
+    "`/user USER_ID`",
+    [
+      [
+        {
+          text: "👑 Admin Panel",
+          callback_data: "admin_panel"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   ADMIN LIST
+============================================================ */
+
+async function showAdminList(db, chatId) {
+  const lines =
+    db.admins.map(
+      (id, index) =>
+        `${index + 1}. \`${id}\`` +
+        (String(id) === String(OWNER_ID)
+          ? " 👑 OWNER"
+          : "")
+    );
+
+  await sendMessage(
+    chatId,
+    "🛡️ *ADMIN LIST*\n\n" +
+    lines.join("\n"),
+    [
+      [
+        {
+          text: "➕ Add Admin",
+          callback_data: "admin_add"
+        },
+        {
+          text: "➖ Remove Admin",
+          callback_data: "admin_remove"
+        }
+      ],
+      [
+        {
+          text: "👑 Admin Panel",
+          callback_data: "admin_panel"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   DOMAIN PANEL
+============================================================ */
+
+async function showDomainPanel(db, chatId) {
+  await sendMessage(
+    chatId,
+    "🌐 *CUSTOM DOMAIN*\n\n" +
+    "Current domain:\n" +
+    "`" +
+    escapeMarkdown(db.settings.domain) +
+    "`\n\n" +
+    "Change it with:\n" +
+    "`/domain example.com`\n\n" +
+    "⚠️ Cloudflare DNS/Email Routing must also be configured separately. " +
+    "Changing this setting alone does not create DNS records.",
+    [
+      [
+        {
+          text: "↩️ Reset Default",
+          callback_data: "domain_default"
+        }
+      ],
+      [
+        {
+          text: "👑 Admin Panel",
+          callback_data: "admin_panel"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   AUDIT LOGS
+============================================================ */
+
+async function showAuditLogs(db, chatId) {
+  const logs =
+    db.audit_logs.slice(0, 20);
+
+  if (!logs.length) {
+    await sendText(chatId, "📝 No audit logs.");
+    return;
+  }
+
+  const lines =
+    logs.map(
+      x =>
+        "• `" +
+        formatDate(x.time) +
+        "`\n" +
+        x.action +
+        "\nUser: `" +
+        x.user_id +
+        "`\n" +
+        escapeMarkdown(String(x.detail || ""))
+    );
+
+  await sendMessage(
+    chatId,
+    "📝 *AUDIT LOGS*\n\n" +
+    lines.join("\n\n"),
+    [
+      [
+        {
+          text: "👑 Admin Panel",
+          callback_data: "admin_panel"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   COMMANDS
+============================================================ */
+
+async function handleAdminCommand(db, message) {
+  const userId = message.from.id;
+  const chatId = message.chat.id;
+  const text = String(message.text || "");
+
+  if (!isAdmin(db, userId)) {
+    await deny(chatId);
+    return true;
+  }
+
+  if (text.startsWith("/addadmin ")) {
+    if (!isOwner(db, userId)) {
+      await ownerOnly(chatId);
+      return true;
+    }
+
+    const target =
+      text.split(/\s+/)[1];
+
+    if (!target) return true;
+
+    if (!db.admins.includes(String(target))) {
+      if (db.admins.length >= MAX_ADMINS) {
+        await sendText(chatId, "❌ Admin limit reached.");
+        return true;
+      }
+
+      db.admins.push(String(target));
+
+      addAudit(
+        db,
+        userId,
+        "add_admin",
+        target
+      );
+
+      await saveDB(db);
+    }
+
+    await sendText(
+      chatId,
+      "✅ Admin added:\n`" + target + "`"
+    );
+
+    return true;
+  }
+
+  if (text.startsWith("/removeadmin ")) {
+    if (!isOwner(db, userId)) {
+      await ownerOnly(chatId);
+      return true;
+    }
+
+    const target =
+      text.split(/\s+/)[1];
+
+    if (!target) return true;
+
+    if (String(target) === String(OWNER_ID)) {
+      await sendText(
+        chatId,
+        "❌ Owner cannot be removed."
+      );
+      return true;
+    }
+
+    db.admins =
+      db.admins.filter(
+        x => String(x) !== String(target)
+      );
+
+    addAudit(
+      db,
+      userId,
+      "remove_admin",
+      target
+    );
+
+    await saveDB(db);
+
+    await sendText(
+      chatId,
+      "✅ Admin removed:\n`" + target + "`"
+    );
+
+    return true;
+  }
+
+  if (text.startsWith("/transfer ")) {
+    if (!isOwner(db, userId)) {
+      await ownerOnly(chatId);
+      return true;
+    }
+
+    const target =
+      text.split(/\s+/)[1];
+
+    if (!target) return true;
+
+    /*
+     * Safe ownership transfer:
+     * new owner is added to admins.
+     *
+     * The immutable OWNER_ID constant is not
+     * overwritten at runtime because it is a
+     * configuration value.
+     *
+     * For actual deployment, change OWNER_ID
+     * after transfer.
+     */
+
+    if (!db.admins.includes(String(target))) {
+      db.admins.push(String(target));
+    }
+
+    db.settings.pending_owner =
+      String(target);
+
+    addAudit(
+      db,
+      userId,
+      "owner_transfer_requested",
+      target
+    );
+
+    await saveDB(db);
+
+    await sendText(
+      chatId,
+      "👑 Transfer request recorded for:\n" +
+      "`" + target + "`\n\n" +
+      "For permanent ownership transfer, update OWNER_ID in Worker configuration after verifying the target."
+    );
+
+    return true;
+  }
+
+  if (text.startsWith("/domain ")) {
+    if (!isOwner(db, userId)) {
+      await ownerOnly(chatId);
+      return true;
+    }
+
+    let domain =
+      text.split(/\s+/)[1] || "";
+
+    domain =
+      domain
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/\/.*$/, "")
+        .trim();
+
+    if (!isValidDomain(domain)) {
+      await sendText(
+        chatId,
+        "❌ Invalid domain."
+      );
+      return true;
+    }
+
+    db.settings.domain = domain;
+
+    addAudit(
+      db,
+      userId,
+      "domain_changed",
+      domain
+    );
+
+    await saveDB(db);
+
+    await sendText(
+      chatId,
+      "✅ Domain changed to:\n`" +
+      escapeMarkdown(domain) +
+      "`"
+    );
+
+    return true;
+  }
+
+  if (text.startsWith("/broadcast ")) {
+    const body =
+      text.slice("/broadcast ".length).trim();
+
+    if (!body) return true;
+
+    await broadcast(db, userId, body, chatId);
+
+    return true;
+  }
+
+  if (text === "/dbinfo") {
+    if (!isOwner(db, userId)) {
+      await ownerOnly(chatId);
+      return true;
+    }
+
+    await sendText(
+      chatId,
+      "💾 *DATABASE*\n\n" +
+      "Storage: Telegram Channel\n" +
+      "Format: JSON\n" +
+      "KV: disabled\n" +
+      "Users: " +
+      Object.keys(db.users).length +
+      "\nEmails: " +
+      Object.keys(db.emails).length +
+      "\nAdmins: " +
+      db.admins.length
+    );
+
+    return true;
+  }
+
+  if (text.startsWith("/user ")) {
+    const target =
+      text.split(/\s+/)[1];
+
+    if (!target) return true;
+
+    const targetUser =
+      db.users[String(target)];
+
+    if (!targetUser) {
+      await sendText(
+        chatId,
+        "❌ User not found."
+      );
+      return true;
+    }
+
+    /*
+     * IMPORTANT:
+     * Admins can inspect account metadata,
+     * but cannot retrieve another user's OTP.
+     */
+
+    await sendMessage(
+      chatId,
+      "👤 *USER INFORMATION*\n\n" +
+      "ID: `" + targetUser.id + "`\n" +
+      "Name: " +
+      escapeMarkdown(targetUser.first_name || "") +
+      "\n" +
+      "Joined: " +
+      formatDate(targetUser.created_at) +
+      "\n" +
+      "Emails: " +
+      (targetUser.email_ids?.length || 0) +
+      "\n\n" +
+      "🔐 User OTP contents are private.",
+      [
+        [
+          {
+            text: "👑 Admin Panel",
+            callback_data: "admin_panel"
+          }
+        ]
+      ]
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+/* ============================================================
+   PATCH MESSAGE HANDLER FOR COMMANDS
+============================================================ */
+
+const originalHandleMessage = handleMessage;
+
+handleMessage = async function(message) {
+  const db = await loadDB();
+
+  await ensureUser(db, message.from);
+
+  const text = String(message.text || "");
+
+  if (text.startsWith("/")) {
+    const handled =
+      await handleAdminCommand(db, message);
+
+    if (handled) return;
+  }
+
+  if (text.startsWith("/custom ")) {
+    await createCustomEmail(
+      db,
+      message.chat.id,
+      message.from.id,
+      text.slice(8).trim()
+    );
+    return;
+  }
+
+  await originalHandleMessage(message);
+};
+
+/* ============================================================
+   CUSTOM EMAIL CREATION
+============================================================ */
+
+async function createCustomEmail(
+  db,
+  chatId,
+  userId,
+  username
+) {
+  if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) {
+    await sendText(
+      chatId,
+      "❌ Invalid username.\nUse 3-40 letters, numbers, `.`, `_`, or `-`."
+    );
+    return;
+  }
+
+  const email =
+    username.toLowerCase() +
+    "@" +
+    db.settings.domain;
+
+  const emailId =
+    "em_" + randomId();
+
+  db.emails[emailId] = {
+    id: emailId,
+    user_id: String(userId),
+    email,
+    created_at: Date.now(),
+    active: true,
+    custom: true
+  };
+
+  const user =
+    db.users[String(userId)];
+
+  user.email_ids =
+    user.email_ids || [];
+
+  user.email_ids.unshift(emailId);
+
+  user.email_ids =
+    user.email_ids.slice(0, MAX_EMAILS_PER_USER);
+
+  db.stats.generated_emails++;
+
+  addAudit(
+    db,
+    userId,
+    "create_custom_test_email",
+    email
+  );
+
+  await saveDB(db);
+
+  await sendMessage(
+    chatId,
+    "✅ *Custom Test Email Created*\n\n" +
+    "`" +
+    escapeMarkdown(email) +
+    "`",
+    [
+      [
+        {
+          text: "📋 Copy",
+          copy_text: {
+            text: email
+          }
+        }
+      ],
+      [
+        {
+          text: "🔢 Test OTP",
+          callback_data: "generate_test_otp"
+        }
+      ],
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+/* ============================================================
+   BROADCAST
+============================================================ */
+
+async function broadcast(
+  db,
+  adminId,
+  body,
+  adminChatId
+) {
+  const userIds =
+    Object.keys(db.users)
+      .slice(0, MAX_BROADCAST_USERS);
+
+  let sent = 0;
+  let failed = 0;
+
+  await sendText(
+    adminChatId,
+    "📢 Broadcast started...\nUsers: " +
+    userIds.length
+  );
+
+  for (const id of userIds) {
+    try {
+      await sendMessage(
+        id,
+        "📢 *Announcement*\n\n" +
+        escapeMarkdown(body),
+        [
+          [
+            {
+              text: "🏠 Open Panel",
+              callback_data: "home"
+            }
+          ]
+        ]
+      );
+
+      sent++;
+
+      /*
+       * Small delay to reduce Telegram rate-limit risk.
+       */
+      await sleep(80);
+
+    } catch {
+      failed++;
+    }
+  }
+
+  db.stats.broadcasts++;
+
+  addAudit(
+    db,
+    adminId,
+    "broadcast",
+    body.slice(0, 100)
+  );
+
+  await saveDB(db);
+
+  await sendText(
+    adminChatId,
+    "✅ Broadcast finished.\n\n" +
+    "Sent: " + sent + "\n" +
+    "Failed: " + failed
+  );
+}
+
+/* ============================================================
+   DATABASE
+============================================================ */
+
+/*
+ * Telegram Channel database design:
+ *
+ * Channel
+ *   ↓
+ * pinned message
+ *   ↓
+ * JSON
+ *
+ * The bot reads pinned_message.text
+ * and edits the same message.
+ */
+
+async function loadDB() {
+  const chat =
+    await telegram("getChat", {
+      chat_id: DB_CHANNEL_ID
+    });
+
+  const pinned =
+    chat?.result?.pinned_message;
+
+  if (!pinned) {
+    throw new Error(
+      "DB channel has no pinned database message."
+    );
+  }
+
+  const raw =
+    pinned.text ||
+    pinned.caption ||
+    "";
+
+  try {
+    const parsed =
+      JSON.parse(raw);
+
+    return normalizeDB(parsed);
+  } catch {
+    throw new Error(
+      "Pinned DB message does not contain valid JSON."
     );
   }
 }
 
-async function handleOldHubPrompt(chatId) {
-  USER_STATE.set(chatId, "awaiting_old_email");
-  await sendMsg(
-    chatId, 
-    `🔑 *Admin Recovery Hub*\n\nJis purane email ka OTP dekhna hai, woh address yahan bhejein:\n\n_Example:_ \`muskan.sharma991@${DOMAIN}\``
-  );
+function normalizeDB(db) {
+  const base =
+    createDefaultDB();
+
+  return {
+    ...base,
+    ...db,
+
+    settings: {
+      ...base.settings,
+      ...(db.settings || {})
+    },
+
+    admins:
+      Array.isArray(db.admins)
+        ? db.admins.map(String)
+        : base.admins,
+
+    users:
+      db.users || {},
+
+    emails:
+      db.emails || {},
+
+    test_inboxes:
+      db.test_inboxes || {},
+
+    audit_logs:
+      Array.isArray(db.audit_logs)
+        ? db.audit_logs.slice(0, MAX_AUDIT_LOGS)
+        : [],
+
+    stats: {
+      ...base.stats,
+      ...(db.stats || {})
+    }
+  };
 }
 
-async function linkAndCheckOldEmail(chatId, inputEmail, workerOrigin, db, messageId) {
-  const cleanEmail = inputEmail.toLowerCase().trim();
+async function saveDB(db) {
+  db = normalizeDB(db);
 
-  if (!cleanEmail.endsWith(`@${DOMAIN}`)) {
-    await sendMsg(chatId, `⚠️ Invalid Domain! Email \`@${DOMAIN}\` par khatam hona chahiye.`);
-    return;
+  /*
+   * Limit audit data.
+   */
+  db.audit_logs =
+    db.audit_logs.slice(0, MAX_AUDIT_LOGS);
+
+  /*
+   * Prevent accidental oversized DB.
+   */
+  const json =
+    JSON.stringify(db);
+
+  if (json.length > 3900) {
+    /*
+     * Keep the database message under
+     * Telegram's text message limit.
+     *
+     * First reduce logs.
+     */
+    db.audit_logs =
+      db.audit_logs.slice(0, 30);
   }
 
-  db.users[chatId] = cleanEmail;
-  db.emails[cleanEmail] = chatId;
-  await saveChannelDb(messageId, db);
+  const finalJson =
+    JSON.stringify(db);
 
-  const record = db.inboxes ? db.inboxes[cleanEmail] : null;
-  const userIsAdmin = checkIsAdmin(chatId, db);
-
-  if (record && (record.otp || record.lnk)) {
-    const previewKey = cleanEmail.replace(/[^a-z0-9]/g, "_");
-    await sendMsg(chatId, `✅ *Email Re-Linked (Admin Verified)!* Active OTP:`);
-    await deliverOtpBox(chatId, record.otp, cleanEmail, record.lnk, record.hist || [], previewKey, workerOrigin, userIsAdmin);
-  } else {
-    await sendMsg(
-      chatId, 
-      `✅ *Email Successfully Bound!*\n\nTarget Email: \`${cleanEmail}\`\n\nAb app me jakar 'Resend OTP' karein, OTP turant yahan receive hoga.`,
-      null,
-      { inline_keyboard: [[{ text: "🔄 Check OTP", callback_data: "btn_check_otp" }]] }
+  if (finalJson.length > 4000) {
+    throw new Error(
+      "Database is too large for a single Telegram message. Archive/partition the database."
     );
   }
+
+  const chat =
+    await telegram("getChat", {
+      chat_id: DB_CHANNEL_ID
+    });
+
+  const pinned =
+    chat?.result?.pinned_message;
+
+  if (!pinned) {
+    throw new Error(
+      "No pinned database message."
+    );
+  }
+
+  await telegram("editMessageText", {
+    chat_id: DB_CHANNEL_ID,
+    message_id: pinned.message_id,
+    text: finalJson
+  });
 }
 
-// --- SECURE OTP DELIVERY CARD ---
-async function deliverOtpBox(chatId, otp, toEmail, link, history = [], previewKey = "", workerOrigin = "", isAdmin = false) {
-  let historySection = "";
-  if (history.length > 1) {
-    historySection = `\n📜 *Pichle OTPs:*\n` + history.map(h => `• \`${h.otp}\` _(${h.time})_`).join("\n");
+/* ============================================================
+   FIRST-TIME DB INITIALIZATION
+============================================================ */
+
+/*
+ * Run this manually once:
+ *
+ * 1. Create DB channel.
+ * 2. Add bot as admin.
+ * 3. Send:
+ *
+ * {
+ *   "version": 1,
+ *   "settings": {
+ *     "domain": "your-domain.example",
+ *     "bot_enabled": true,
+ *     "maintenance": false
+ *   },
+ *   "admins": ["YOUR_OWNER_ID"],
+ *   "users": {},
+ *   "emails": {},
+ *   "test_inboxes": {},
+ *   "audit_logs": [],
+ *   "stats": {
+ *     "generated_emails": 0,
+ *     "generated_otps": 0,
+ *     "users_created": 0,
+ *     "broadcasts": 0
+ *   }
+ * }
+ *
+ * 4. Pin that message.
+ */
+
+/* ============================================================
+   USER CREATION
+============================================================ */
+
+async function ensureUser(db, tgUser) {
+  const id =
+    String(tgUser.id);
+
+  if (!db.users[id]) {
+    if (
+      Object.keys(db.users).length >= MAX_USERS
+    ) {
+      throw new Error(
+        "User limit reached."
+      );
+    }
+
+    db.users[id] = {
+      id,
+      first_name:
+        tgUser.first_name || "",
+      last_name:
+        tgUser.last_name || "",
+      username:
+        tgUser.username || "",
+      created_at:
+        Date.now(),
+      email_ids: []
+    };
+
+    db.stats.users_created++;
+
+    addAudit(
+      db,
+      id,
+      "user_created",
+      tgUser.username || tgUser.first_name || ""
+    );
+
+    await saveDB(db);
   }
-
-  let text = otp ? 
-`┏━━━━━━━━━━━━━━━━━━━━━┓
-  🔐 *META VERIFICATION OTP*
-┗━━━━━━━━━━━━━━━━━━━━━┛
-
-\`${otp}\`
-
-_(Tap code to copy)_
-─────────────────────
-📧 *Email:* \`${toEmail}\`${historySection}` : 
-`📩 *Verification Link Received!*
-─────────────────────
-📧 *Email:* \`${toEmail}\``;
-
-  let inlineBtns = [];
-  if (link) {
-    inlineBtns.push([{ text: "🌐 Open Verification Link", url: link }]);
-  }
-
-  if (previewKey && workerOrigin) {
-    const viewUrl = `${workerOrigin}/view?id=${previewKey}`;
-    inlineBtns.push([{ text: "📄 View Full HTML Email", url: viewUrl }]);
-  }
-
-  inlineBtns.push([
-    { text: "🔄 Refresh Status", callback_data: "btn_check_otp" },
-    { text: "⚡ Generate New", callback_data: "btn_gen" }
-  ]);
-
-  if (isAdmin) {
-    inlineBtns.push([{ text: "🔑 Link Another Email (Admin)", callback_data: "btn_old_hub" }]);
-  }
-
-  await sendMsg(chatId, text, null, { inline_keyboard: inlineBtns });
 }
 
-// --- TELEGRAM SENDER UTILITIES ---
-async function sendMsg(chatId, text,replyKeyboard = null, inlineKeyboard = null) {
-  const payload = { chat_id: chatId, text: text, parse_mode: "Markdown" };
-  if (replyKeyboard) payload.reply_markup = replyKeyboard;
-  if (inlineKeyboard) payload.reply_markup = inlineKeyboard;
+/* ============================================================
+   AUDIT
+============================================================ */
 
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+function addAudit(
+  db,
+  userId,
+  action,
+  detail
+) {
+  db.audit_logs.unshift({
+    time: Date.now(),
+    user_id: String(userId),
+    action,
+    detail: String(detail || "")
+  });
+
+  db.audit_logs =
+    db.audit_logs.slice(0, MAX_AUDIT_LOGS);
+}
+
+/* ============================================================
+   ACCESS
+============================================================ */
+
+function isAdmin(db, userId) {
+  return db.admins
+    .map(String)
+    .includes(String(userId));
+}
+
+function isOwner(db, userId) {
+  return String(userId) === String(OWNER_ID);
+}
+
+/* ============================================================
+   COOLDOWN
+============================================================ */
+
+function checkCooldown(userId) {
+  const id =
+    String(userId);
+
+  const now =
+    Date.now();
+
+  const last =
+    runtimeCooldown.get(id) || 0;
+
+  if (
+    now - last <
+    USER_COOLDOWN_MS
+  ) {
+    return false;
+  }
+
+  runtimeCooldown.set(
+    id,
+    now
+  );
+
+  return true;
+}
+
+/* ============================================================
+   TELEGRAM API
+============================================================ */
+
+async function telegram(method, payload = {}) {
+  const url =
+    `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
+
+  const response =
+    await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "content-type": "application/json"
+      },
       body: JSON.stringify(payload)
     });
-    return await res.json();
-  } catch (e) {
-    return null;
+
+  const data =
+    await response.json();
+
+  if (!data.ok) {
+    throw new Error(
+      `Telegram API ${method}: ` +
+      JSON.stringify(data)
+    );
+  }
+
+  return data;
+}
+
+async function sendMessage(
+  chatId,
+  text,
+  keyboard = []
+) {
+  return telegram(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text,
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: keyboard
+      }
+    }
+  );
+}
+
+async function sendText(
+  chatId,
+  text
+) {
+  return sendMessage(
+    chatId,
+    text,
+    [
+      [
+        {
+          text: "🏠 Home",
+          callback_data: "home"
+        }
+      ]
+    ]
+  );
+}
+
+async function answerCallback(id) {
+  try {
+    await telegram(
+      "answerCallbackQuery",
+      {
+        callback_query_id: id
+      }
+    );
+  } catch {}
+}
+
+/* ============================================================
+   ACCESS RESPONSES
+============================================================ */
+
+async function deny(chatId) {
+  await sendText(
+    chatId,
+    "❌ You do not have permission."
+  );
+}
+
+async function ownerOnly(chatId) {
+  await sendText(
+    chatId,
+    "👑 Owner permission required."
+  );
+}
+
+/* ============================================================
+   UTILITIES
+============================================================ */
+
+function randomItem(arr) {
+  return arr[
+    Math.floor(
+      Math.random() * arr.length
+    )
+  ];
+}
+
+function randomId() {
+  return (
+    Date.now().toString(36) +
+    Math.random()
+      .toString(36)
+      .slice(2, 9)
+  );
+}
+
+function sleep(ms) {
+  return new Promise(
+    resolve => setTimeout(resolve, ms)
+  );
+}
+
+function formatDate(timestamp) {
+  try {
+    return new Date(timestamp)
+      .toISOString()
+      .replace("T", " ")
+      .slice(0, 19);
+  } catch {
+    return "Unknown";
   }
 }
 
-async function editMsg(chatId, messageId, text, inlineKeyboard) {
-  try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_id: messageId,
-        text: text,
-        parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: inlineKeyboard }
-      })
-    });
-  } catch (e) {}
+function escapeMarkdown(text) {
+  return String(text)
+    .replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
 }
 
-async function deleteMsg(chatId, messageId) {
-  try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, message_id: messageId })
-    });
-  } catch (e) {}
+function isValidDomain(domain) {
+  if (!domain) return false;
+
+  if (domain.length > 253) {
+    return false;
+  }
+
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i
+    .test(domain);
 }
+
+/* ============================================================
+   OPTIONAL WEBHOOK SETUP
+============================================================ */
+
+/*
+ * Set webhook manually from a browser/API:
+ *
+ * https://api.telegram.org/botYOUR_TOKEN/setWebhook
+ *
+ * URL:
+ * https://YOUR-WORKER.workers.dev/telegram/webhook
+ *
+ * With secret_token:
+ * PUT_RANDOM_WEBHOOK_SECRET_HERE
+ *
+ * Example request body:
+ *
+ * {
+ *   "url": "https://YOUR-WORKER.workers.dev/telegram/webhook",
+ *   "secret_token": "YOUR_RANDOM_SECRET"
+ * }
+ *
+ * ============================================================
+ *
+ * IMPORTANT:
+ *
+ * The Telegram bot needs admin permission in the DB channel.
+ *
+ * The DB channel needs one pinned message containing JSON.
+ *
+ * Do NOT put the bot token directly into public GitHub code.
+ *
+ * ============================================================
+ */

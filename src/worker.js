@@ -195,7 +195,7 @@ export default {
             db.admins.push(targetId);
             await saveChannelDb(messageId, db);
             await sendMsg(chatId, `✅ Chat ID \`${targetId}\` ko Admin bana diya gaya!`);
-            await sendMsg(targetId, "🎉 *Badhaai Ho!* Aapko is bot का Admin bana diya gaya hai.");
+            await sendMsg(targetId, "🎉 *Badhaai Ho!* Aapko is bot ka Admin bana diya gaya hai.");
           } else {
             await sendMsg(chatId, `⚠️ Yeh ID \`${targetId}\` pehle se Admin hai.`);
           }
@@ -241,7 +241,7 @@ export default {
           if (userIsAdmin) {
             await linkAndCheckOldEmail(chatId, text, workerOrigin, db, messageId);
           } else {
-            await sendMsg(chatId, "⚠️ Aap purana email yahan link nahi kar sakte. Naya email lene ke liye *⚡ Random Email* ya *✏️ Custom Email* button dabayein.");
+            await sendMsg(chatId, "⚠️ Aap purana email yahan link nahi kar sakte. Naya email lene ke liye buttons ka upyog karein.");
           }
           return new Response("OK");
         }
@@ -253,14 +253,14 @@ export default {
           const roleBadge = isOwner ? "👑 *Owner Mode*" : (userIsAdmin ? "🛡️ *Admin Mode*" : "👤 *User Mode*");
 
           await sendMsg(chatId, 
-            `👋 *Meta AI & Instagram Temp Mail Engine*\n\nStatus: ${roleBadge}\n\nNiche diye गए buttons se instant email banayein ya OTP check karein:`, 
+            `👋 *Meta AI & Instagram Temp Mail Hub*\n\nStatus: ${roleBadge}\n\nNiche diye gaye buttons se naya email create karein ya custom Gmail banayein:`, 
             replyKeyboard
           );
         }
-        else if (text === "⚡ Random Email" || text === "⚡ Generate Email" || text === "/gen") {
+        else if (text === "⚡ Generate Email" || text === "⚡ Random Email" || text === "/gen") {
           await handleEmailGenRequest(chatId, workerOrigin, db, messageId);
         }
-        else if (text === "✏️ Custom Email" || text === "✏️ Custom Gmail" || text === "/custom") {
+        else if (text === "✏️ Custom Gmail" || text === "✏️ Custom Email" || text === "/custom") {
           await handleCustomNamePrompt(chatId);
         }
         else if (text === "📬 Check OTP" || text === "/otp") {
@@ -384,7 +384,6 @@ function extractMetaAiOtp(subject, rawBody) {
     .replace(/=\r?\n/g, "")
     .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 
-  // Subject line check (Highest accuracy for 6 digits)
   if (subject) {
     const subjMatch = subject.match(/\b(\d{3})\s?(\d{3})\b/) || subject.match(/\b(\d{6})\b/);
     if (subjMatch) {
@@ -393,7 +392,6 @@ function extractMetaAiOtp(subject, rawBody) {
     }
   }
 
-  // Pre-Clean Styles, Hex codes
   let cleanBody = body
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
@@ -401,14 +399,12 @@ function extractMetaAiOtp(subject, rawBody) {
     .replace(/#[0-9a-fA-F]{6}\b/g, " ")
     .replace(/#[0-9a-fA-F]{3}\b/g, " ");
 
-  // HTML container tags
   const tagMatches = [...cleanBody.matchAll(/>\s*([0-9]{3}\s?[0-9]{3}|[0-9]{6})\s*</g)];
   for (const m of tagMatches) {
     const code = m[1].replace(/\s+/g, "");
     if (code.length === 6 && !code.startsWith("000000")) return code;
   }
 
-  // Contextual pattern match
   let plain = cleanBody.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
   const patterns = [
     /(?:security code|confirmation code|código|verification code|login code)[\s:=–\-#]{1,25}(\b\d{3}\s?\d{3}\b|\b\d{6}\b)/i,
@@ -450,19 +446,21 @@ function getReplyKeyboard(isAdmin) {
   if (isAdmin) {
     return {
       keyboard: [
-        [{ text: "⚡ Random Email" }, { text: "✏️ Custom Gmail" }],
+        [{ text: "⚡ Generate Email" }, { text: "✏️ Custom Gmail" }],
         [{ text: "📬 Check OTP" }, { text: "🔑 Old Email Hub" }],
-        [{ text: "⚙️ Admin Dashboard" }, { text: "🆔 My Chat ID" }]
+        [{ text: "🆔 My Chat ID" }]
       ],
-      resize_keyboard: true
+      resize_keyboard: true,
+      is_persistent: true
     };
   }
   return {
     keyboard: [
-      [{ text: "⚡ Random Email" }, { text: "✏️ Custom Gmail" }],
+      [{ text: "⚡ Generate Email" }, { text: "✏️ Custom Gmail" }],
       [{ text: "📬 Check OTP" }, { text: "🆔 My Chat ID" }]
     ],
-    resize_keyboard: true
+    resize_keyboard: true,
+    is_persistent: true
   };
 }
 
@@ -560,7 +558,7 @@ async function openAdminDashboard(chatId, msgId = null, isOwner = false, db = {}
     { text: "❌ Close Panel", callback_data: "adm_close" }
   ]);
 
-  const panelText = `⚙️ *Admin Control Dashboard*\n\nOwner: \`${PRIMARY_OWNER_ID}\`\n\nNiche diye गए buttons se bot manage karein:`;
+  const panelText = `⚙️ *Admin Control Dashboard*\n\nOwner: \`${PRIMARY_OWNER_ID}\`\n\nNiche diye gaye buttons se bot manage karein:`;
 
   if (msgId) {
     await editMsg(chatId, msgId, panelText, inlineBtns);
@@ -630,7 +628,7 @@ async function handleCustomNamePrompt(chatId) {
   USER_STATE.set(chatId, "awaiting_custom_name");
   await sendMsg(
     chatId, 
-    `✏️ *Custom Gmail / Email Creation*\n\nApna मनपसंद username chat me likhkar bhejein (jaise aapko **myname@${DOMAIN}** chahiye toh sirf *myname* likhein):\n\n_Example:_ \`karan.raj99\` ya \`sneha_vip\`\n\n*(Sirf a-z, 0-9, dot, underscore allowed hain)*`
+    `✏️ *Custom Gmail Creation*\n\nApna मनपसंद username chat me bhejein (jaise agar aapko **myname@${DOMAIN}** chahiye toh sirf *myname* likhein):\n\n_Example:_ \`karan.raj99\` ya \`sneha_vip\`\n\n*(Sirf a-z, 0-9, dot, underscore allowed hain)*`
   );
 }
 
@@ -678,7 +676,7 @@ async function checkCurrentOtp(chatId, workerOrigin, db) {
   const currentEmail = db.users ? db.users[chatId] : null;
 
   if (!currentEmail) {
-    await sendMsg(chatId, "⚠️ Pehle *⚡ Random Email* ya *✏️ Custom Gmail* button dabayein.");
+    await sendMsg(chatId, "⚠️ Pehle *⚡ Generate Email* ya *✏️ Custom Gmail* button dabayein.");
     return;
   }
 
@@ -691,7 +689,7 @@ async function checkCurrentOtp(chatId, workerOrigin, db) {
   } else {
     await sendMsg(
       chatId, 
-      `⏳ *OTP Ka Intezaار Hai...*\n\nActive Email: \`${currentEmail}\`\n\nMeta/Instagram app se OTP send karein, fir yahan refresh karein.`,
+      `⏳ *OTP Ka Intezaar Hai...*\n\nActive Email: \`${currentEmail}\`\n\nMeta/Instagram app se OTP send karein, fir yahan refresh karein.`,
       null,
       { inline_keyboard: [[{ text: "🔄 Refresh Status", callback_data: "btn_check_otp" }]] }
     );
@@ -779,7 +777,7 @@ _(Tap code to copy)_
 }
 
 // --- TELEGRAM SENDER UTILITIES ---
-async function sendMsg(chatId, text, replyKeyboard = null, inlineKeyboard = null) {
+async function sendMsg(chatId, text,replyKeyboard = null, inlineKeyboard = null) {
   const payload = { chat_id: chatId, text: text, parse_mode: "Markdown" };
   if (replyKeyboard) payload.reply_markup = replyKeyboard;
   if (inlineKeyboard) payload.reply_markup = inlineKeyboard;

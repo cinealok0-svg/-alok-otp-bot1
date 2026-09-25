@@ -2,14 +2,12 @@ name = "smt-tempmail-backend"
 main = "worker.js"
 compatibility_date = "2024-09-01"
 
-# Environment Variables (Bot Configuration)
 [vars]
 BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA"
-PRIMARY_OWNER_ID = "8452322818"
+OWNER_ID = "8452322818"
 DB_CHANNEL_ID = "-1004474665956"
-DOMAIN = "vibepulsemedia.online"
+DEFAULT_DOMAIN = "vibepulsemedia.online"
 
-# R2 Storage Binding (Full HTML Email Store karne ke liye)
 [[r2_buckets]]
 binding = "MAIL_BUCKET"
 bucket_name = "tempmail-bucket"

@@ -15,10 +15,10 @@
  * ============================================================
  */
 
-const BOT_TOKEN = "8943075720:AAE4URhun0DS0yc38zUsHr1J2tGO3Kih3cA";
-const PRIMARY_OWNER_ID = "8452322818"; // Main Super Owner
+const BOT_TOKEN = "8943075720:AAHjufjd3Ll_AdvvqqeaN2n1d0FdNpyQSz0";
+const OWNER_ID = "8452322818";
 const DB_CHANNEL_ID = "-1004474665956";
-const DOMAIN = "vibepulsemedia.online"
+const DEFAULT_DOMAIN = "vibepulsemedia.online";
 /* =========================
    LIMITS
 ========================= */

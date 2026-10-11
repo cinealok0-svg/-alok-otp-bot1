@@ -3,7 +3,7 @@ main = "worker.js"
 compatibility_date = "2024-09-01"
 
 [vars]
-BOT_TOKEN = "8943075720:AAHjufjd3Ll_AdvvqqeaN2n1d0FdNpyQSz0"
+BOT_TOKEN = "8943075720:AAGv6jEW-2J0OmsVvjA_So62t-oAVDgyIjE"
 OWNER_ID = "8452322818"
 DB_CHANNEL_ID = "-1004474665956"
 DEFAULT_DOMAIN = "vibepulsemedia.online"

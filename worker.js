@@ -1,7 +1,7 @@
 /**
  * Production-Grade Hotmail/Outlook Stock Dispenser & Auto-OTP Engine
- * Architecture: Zero-Duplication Atomic Queue & Persistent Channel Ledger
- * Secrets Managed Via Cloudflare Environment (wrangler.toml)
+ * Supports: .txt and .csv uploads (Email|Password|RefreshToken|ClientID)
+ * Engine: Native Microsoft Graph API + Dongvan Fallback
  */
 
 let PROCESSING_LOCK = false;
@@ -11,7 +11,7 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Telegram API Helper (Uses env.BOT_TOKEN dynamically)
+// Telegram API Helper
 async function tg(method, body, env) {
   return fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
     method: "POST",
@@ -36,7 +36,7 @@ async function deleteMsg(chatId, messageId, env) {
   return tg("deleteMessage", { chat_id: chatId, message_id: messageId }, env);
 }
 
-// Universal OTP Parser (Hotmail/Outlook & Meta/Service Verifications)
+// Universal OTP Parser
 function extractOtp(subject, bodyText) {
   const combined = `${subject || ""} ${bodyText || ""}`;
   let clean = combined
@@ -51,16 +51,39 @@ function extractOtp(subject, bodyText) {
   return match ? (match[1] || match[0]) : null;
 }
 
-// Outlook / Microsoft Graph / Dongvan Reader Engine
+// Parse lines from TXT and CSV formats
+function sanitizeLines(raw) {
+  if (!raw) return [];
+  const lines = raw.split(/\r?\n/);
+  const valid = [];
+  const seen = new Set();
+  
+  for (let l of lines) {
+    l = l.trim();
+    if (l.length > 5 && l.includes("@")) {
+      // Split by pipe '|', comma ',', or colon ':'
+      const parts = l.includes("|") ? l.split("|") : (l.includes(",") ? l.split(",") : l.split(":"));
+      const email = parts[0]?.trim().toLowerCase();
+      if (email && email.includes("@") && !seen.has(email)) {
+        seen.add(email);
+        // Normalize line format as Email|Pass|RefreshToken|ClientID
+        valid.push(parts.map(p => p.trim()).join("|"));
+      }
+    }
+  }
+  return valid;
+}
+
+// Microsoft Graph API & Dongvan Engine
 async function fetchAccountOtp(line, env) {
   if (!line) return { otp: null };
-  const parts = line.split(/[|:]/);
+  const parts = line.split("|");
   const email = parts[0]?.trim();
   const refreshToken = parts[2]?.trim();
   const clientId = parts[3]?.trim() || "9e5f94bc-e8a4-4e73-b8be-63364c29d753";
   const dongvanKey = env.DONGVAN_KEY || "2Vwu7ROX0jNK7J00kbo5fnhxw";
 
-  // 1. Direct Microsoft OAuth2 / Graph API
+  // 1. Primary: Direct Microsoft OAuth2 Refresh & Graph Fetch
   if (refreshToken) {
     try {
       const body = new URLSearchParams({
@@ -77,7 +100,7 @@ async function fetchAccountOtp(line, env) {
       if (tRes.ok) {
         const tData = await tRes.json();
         if (tData.access_token) {
-          const mRes = await fetch("https://graph.microsoft.com/v1.0/me/messages?$top=3&$orderby=receivedDateTime desc&$select=subject,bodyPreview,body", {
+          const mRes = await fetch("https://graph.microsoft.com/v1.0/me/messages?$top=5&$orderby=receivedDateTime desc&$select=subject,bodyPreview,body", {
             headers: { "Authorization": `Bearer ${tData.access_token}` }
           });
           if (mRes.ok) {
@@ -93,7 +116,7 @@ async function fetchAccountOtp(line, env) {
     } catch (e) {}
   }
 
-  // 2. Dongvan Endpoints Fallback
+  // 2. Secondary: Dongvan Endpoints Fallback
   try {
     const urls = [
       `https://api.dongvanfb.com/user/get_code_oauth?apikey=${dongvanKey}&mail=${encodeURIComponent(line.trim())}`,
@@ -119,7 +142,7 @@ async function fetchAccountOtp(line, env) {
   return { otp: null };
 }
 
-// Master Channel Ledger (Channel Pin Message Database)
+// Master Channel Ledger
 async function getLedgerState(env) {
   try {
     const res = await tg("getChat", { chat_id: env.DB_CHANNEL_ID }, env);
@@ -137,7 +160,7 @@ async function getLedgerState(env) {
 
 async function saveLedgerState(state, env) {
   const remaining = Math.max(0, state.totalCount - state.currentIndex);
-  const text = `🗄️ <b>MASTER STOCK DATABASE (ZERO-DUP ACTIVE)</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Total Uploaded:</b> <code>${state.totalCount}</code>\n📤 <b>Dispensed:</b> <code>${state.currentIndex}</code>\n✅ <b>Fresh Untouched:</b> <code>${remaining}</code>\n📁 <b>Files Connected:</b> <code>${state.fileIds.length}</code>\n━━━━━━━━━━━━━━━━━━\n<code>ZERO_DUP_LEDGER: ${JSON.stringify({
+  const text = `🗄️ <b>MASTER STOCK DATABASE (ZERO-DUP ACTIVE)</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Total Accounts:</b> <code>${state.totalCount}</code>\n📤 <b>Dispensed:</b> <code>${state.currentIndex}</code>\n✅ <b>Fresh Untouched:</b> <code>${remaining}</code>\n📁 <b>Files Connected:</b> <code>${state.fileIds.length}</code>\n━━━━━━━━━━━━━━━━━━\n<code>ZERO_DUP_LEDGER: ${JSON.stringify({
     fileIds: state.fileIds,
     currentIndex: state.currentIndex,
     totalCount: state.totalCount,
@@ -162,20 +185,13 @@ async function loadAllStockLines(fileIds, env) {
       const fileInfo = await tg("getFile", { file_id: fid }, env);
       if (fileInfo?.result?.file_path) {
         const content = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
-        const rawLines = content.split(/\r?\n/);
-        for (let l of rawLines) {
-          l = l.trim();
-          if (l.length > 5 && l.includes("@") && (l.includes("|") || l.includes(":"))) {
-            allLines.push(l);
-          }
-        }
+        allLines = allLines.concat(sanitizeLines(content));
       }
     } catch (e) {}
   }
   return allLines;
 }
 
-// Cloudflare Serverless Entry
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") return new Response("Bot Online & Configured via wrangler.toml", { status: 200 });
@@ -187,7 +203,6 @@ export default {
   }
 };
 
-// Main Event Processor
 async function handleTelegramUpdate(update, env) {
   const msg = update.message;
   const cb = update.callback_query;
@@ -204,42 +219,40 @@ async function handleTelegramUpdate(update, env) {
   const ledger = await getLedgerState(env);
   const isOwner = (userId === String(env.OWNER_ID));
 
-  // 1. ADMIN UPLOAD STOCK FILE (.txt)
+  // 1. FILE UPLOAD (.TXT & .CSV SUPPORT)
   if (msg?.document && isOwner) {
-    if (!msg.document.file_name?.endsWith(".txt")) {
-      return send(chatId, "⚠️ <i>Kripya sirf .txt file upload karein!</i>", env);
+    const fileName = msg.document.file_name?.toLowerCase() || "";
+    if (!fileName.endsWith(".txt") && !fileName.endsWith(".csv")) {
+      return send(chatId, "⚠️ <i>Kripya sirf .txt ya .csv file upload karein!</i>", env);
     }
 
-    const wait = await send(chatId, "⏳ <i>File verify ho rahi hai aur duplicate filtering chal rahi hai...</i>", env);
+    const wait = await send(chatId, "⏳ <i>File read ki ja rahi hai aur duplicate filtering chal rahi hai...</i>", env);
     try {
       const fRes = await tg("sendDocument", {
         chat_id: env.DB_CHANNEL_ID,
         document: msg.document.file_id,
-        caption: `📁 Stock File Uploaded`
+        caption: `📁 Stock File Uploaded: ${fileName}`
       }, env);
       const finalFileId = fRes?.result?.document?.file_id || msg.document.file_id;
 
       const fileInfo = await tg("getFile", { file_id: finalFileId }, env);
       const content = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
-      const rawLines = content.split(/\r?\n/);
+      const newValidLines = sanitizeLines(content);
 
       const existingAccounts = new Set(Object.keys(ledger.usedRegistry || {}));
       const allPrev = await loadAllStockLines(ledger.fileIds, env);
-      allPrev.forEach(l => existingAccounts.add(l.split(/[|:]/)[0].trim().toLowerCase()));
+      allPrev.forEach(l => existingAccounts.add(l.split("|")[0].trim().toLowerCase()));
 
       let validNewCount = 0;
       let duplicateCount = 0;
 
-      for (let l of rawLines) {
-        l = l.trim();
-        if (l.length > 5 && l.includes("@") && (l.includes("|") || l.includes(":"))) {
-          const email = l.split(/[|:]/)[0].trim().toLowerCase();
-          if (existingAccounts.has(email)) {
-            duplicateCount++;
-          } else {
-            existingAccounts.add(email);
-            validNewCount++;
-          }
+      for (let l of newValidLines) {
+        const email = l.split("|")[0].trim().toLowerCase();
+        if (existingAccounts.has(email)) {
+          duplicateCount++;
+        } else {
+          existingAccounts.add(email);
+          validNewCount++;
         }
       }
 
@@ -248,13 +261,13 @@ async function handleTelegramUpdate(update, env) {
       await saveLedgerState(ledger, env);
 
       const remaining = Math.max(0, ledger.totalCount - ledger.currentIndex);
-      return edit(chatId, wait.result.message_id, `✅ <b>File Stock Me Safalta Se Add Ho Gayi!</b>\n━━━━━━━━━━━━━━━━━━\n➕ Naye Unique Accounts: <code>${validNewCount}</code>\n🚫 Duplicate (Skipped): <code>${duplicateCount}</code>\n📦 Total Stock: <code>${ledger.totalCount}</code>\n✅ Fresh Baaki: <code>${remaining}</code>`, env);
+      return edit(chatId, wait.result.message_id, `✅ <b>File Stock Me Safalta Se Add Ho Gayi!</b>\n━━━━━━━━━━━━━━━━━━\n📁 Format: <code>${fileName.endsWith('.csv') ? 'CSV' : 'TXT'}</code>\n➕ Naye Unique Accounts: <code>${validNewCount}</code>\n🚫 Duplicate (Skipped): <code>${duplicateCount}</code>\n📦 Total Stock: <code>${ledger.totalCount}</code>\n✅ Fresh Baaki: <code>${remaining}</code>`, env);
     } catch (e) {
-      return edit(chatId, wait.result.message_id, "❌ File add karne me dikkat aayi.", env);
+      return edit(chatId, wait.result.message_id, "❌ File add karne me error aaya.", env);
     }
   }
 
-  // 2. ADMIN DIRECT LIVE RE-OTP (Any Old/New Email)
+  // 2. ADMIN DIRECT LIVE RE-OTP
   if (isOwner && text.startsWith("/getotp")) {
     const targetMail = text.split(" ")[1]?.trim().toLowerCase();
     if (!targetMail) return send(chatId, "⚠️ Format: <code>/getotp email@hotmail.com</code>", env);
@@ -279,10 +292,24 @@ async function handleTelegramUpdate(update, env) {
     }
   }
 
-  // 3. START / HOME MENU
+  // 3. ADMIN STOCK RESET / CLEAR
+  if (isOwner && (text === "/clearstock" || data === "confirm_clear_stock")) {
+    ledger.fileIds = [];
+    ledger.currentIndex = 0;
+    ledger.totalCount = 0;
+    ledger.usedRegistry = {};
+    ledger.activeWorkers = {};
+    await saveLedgerState(ledger, env);
+    
+    const clearedMsg = "🧹 <b>Stock Successfully Cleared!</b>\nPura purana stock reset ho chuka hai. Ab aap naye सिरे se `.txt` ya `.csv` file upload kar sakte hain.";
+    if (cb) return edit(chatId, cb.message.message_id, clearedMsg, env, { inline_keyboard: [[{ text: "🏠 Main Menu", callback_data: "home" }]] });
+    return send(chatId, clearedMsg, env);
+  }
+
+  // 4. MAIN MENU / START
   if (text === "/start" || data === "home") {
     const remaining = Math.max(0, ledger.totalCount - ledger.currentIndex);
-    const welcome = `👋 <b>Hotmail / Outlook One-by-One Engine</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Available Fresh Stock:</b> <code>${remaining}</code> Accounts\n🔒 <b>Duplicate Protection:</b> 100% Active\n\nNiche <b>Get Start</b> par tap karein, aapko ek single unique email milega:`;
+    const welcome = `👋 <b>Hotmail / Outlook One-by-One Engine</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Available Fresh Stock:</b> <code>${remaining}</code> Accounts\n🔒 <b>Duplicate Protection:</b> 100% Active\n━━━━━━━━━━━━━━━━━━\nNiche <b>Get Start</b> par tap karein, aapko ek single unique email milega:`;
     
     const kb = {
       inline_keyboard: [
@@ -291,7 +318,8 @@ async function handleTelegramUpdate(update, env) {
     };
 
     if (isOwner) {
-      kb.inline_keyboard.push([{ text: "📁 Upload Stock (.txt)", callback_data: "guide_upload" }]);
+      kb.inline_keyboard.push([{ text: "📁 Upload Stock (.csv / .txt)", callback_data: "guide_upload" }]);
+      kb.inline_keyboard.push([{ text: "🧹 Clear Old Stock (Reset All)", callback_data: "confirm_clear_stock" }]);
     }
 
     if (cb) return edit(chatId, cb.message.message_id, welcome, env, kb);
@@ -299,14 +327,14 @@ async function handleTelegramUpdate(update, env) {
   }
 
   if (data === "guide_upload" && isOwner) {
-    return send(chatId, "📁 <b>Stock Upload Guide:</b>\nSeedhe <code>.txt</code> file bhejein. Bot automatically check karega aur purana stock bina disturb kiye nayi file add karega.", env);
+    return send(chatId, "📁 <b>File Upload Instruction:</b>\nSeedhe <code>.txt</code> ya <code>.csv</code> file is chat me bhejein.\nFormat: <code>Email|Password|RefreshToken|ClientID</code>\nBot duplicates ko skip karke fresh stock update kar dega.", env);
   }
 
-  // 4. ATOMIC SINGLE-USE DISPENSER
+  // 5. ATOMIC DISPENSER
   if (data === "dispense_email") {
     if (ledger.activeWorkers && ledger.activeWorkers[userId]) {
       const activeMail = ledger.activeWorkers[userId];
-      const activeCard = `⚠️ <b>Aapke Paas Pehle Se Ek Active Email Hai:</b>\n━━━━━━━━━━━━━━━━━━\n📬 <b>Email:</b> <code>${activeMail}</code>\n━━━━━━━━━━━━━━━━━━\n<i>Pehle iska OTP lein. Naya email lene ke liye niche cancel dabayein:</i>`;
+      const activeCard = `⚠️ <b>Aapke Paas Pehle Se Ek Active Email Hai:</b>\n━━━━━━━━━━━━━━━━━━\n📬 <b>Email:</b> <code>${activeMail}</code>\n━━━━━━━━━━━━━━━━━━\n<i>Pehle iska OTP lein. Naya lene ke liye Cancel dabayein:</i>`;
       return edit(chatId, cb.message.message_id, activeCard, env, {
         inline_keyboard: [
           [{ text: "📩 Get OTP", callback_data: `read_otp:${encodeURIComponent(activeMail)}` }],
@@ -325,7 +353,7 @@ async function handleTelegramUpdate(update, env) {
 
     try {
       if (ledger.fileIds.length === 0 || ledger.currentIndex >= ledger.totalCount) {
-        if (isOwner) send(env.OWNER_ID, "🚨 <b>ALERT: Stock pura khatam ho chuka hai!</b> Nayi .txt file dalein.", env);
+        if (isOwner) send(env.OWNER_ID, "🚨 <b>ALERT: Stock pura khatam ho chuka hai!</b> Nayi file dalein.", env);
         PROCESSING_LOCK = false;
         return edit(chatId, cb.message.message_id, "❌ <b>Stock Khatam Ho Chuka Hai!</b>\nAdmin ko alert bhej diya gaya hai.", env, {
           inline_keyboard: [[{ text: "🏠 Refresh Menu", callback_data: "home" }]]
@@ -335,7 +363,7 @@ async function handleTelegramUpdate(update, env) {
       const allLines = await loadAllStockLines(ledger.fileIds, env);
       const assignedIndex = ledger.currentIndex;
       const assignedLine = allLines[assignedIndex];
-      const email = assignedLine.split(/[|:]/)[0].trim().toLowerCase();
+      const email = assignedLine.split("|")[0].trim().toLowerCase();
 
       ledger.currentIndex += 1;
       ledger.usedRegistry[email] = assignedLine;
@@ -345,7 +373,7 @@ async function handleTelegramUpdate(update, env) {
 
       PROCESSING_LOCK = false;
 
-      const emailCard = `📧 <b>AAPKA EMAIL TAIYAR HAI:</b>\n━━━━━━━━━━━━━━━━━━\n📬 <b>Email:</b> <code>${email}</code>\n━━━━━━━━━━━━━━━━━━\n\n1️⃣ Email ko copy karein aur wahan dalein jahan account banana hai.\n2️⃣ Wahan se OTP send hote hi niche <b>Get OTP</b> dabayein.`;
+      const emailCard = `📧 <b>AAPKA EMAIL TAIYAR HAI:</b>\n━━━━━━━━━━━━━━━━━━\n📬 <b>Email:</b> <code>${email}</code>\n━━━━━━━━━━━━━━━━━━\n\n1️⃣ Email ko copy karke jahan verify karna hai wahan dalein.\n2️⃣ Wahan se OTP request bhejne ke baad <b>Get OTP</b> dabayein.`;
 
       const kb = {
         inline_keyboard: [
@@ -363,7 +391,7 @@ async function handleTelegramUpdate(update, env) {
     }
   }
 
-  // Force Cancel & Next Email
+  // Force Cancel & Get New
   if (data === "force_new_email") {
     if (ledger.activeWorkers && ledger.activeWorkers[userId]) {
       delete ledger.activeWorkers[userId];
@@ -374,7 +402,7 @@ async function handleTelegramUpdate(update, env) {
     }, env);
   }
 
-  // 5. FETCH LIVE OTP & ONE-TAP COPY
+  // 6. READ OTP & ONE-TAP COPY
   if (data?.startsWith("read_otp:") || data?.startsWith("ref_otp:")) {
     const rawMail = data.startsWith("read_otp:") ? data.replace("read_otp:", "") : data.replace("ref_otp:", "");
     const email = decodeURIComponent(rawMail);
@@ -382,7 +410,7 @@ async function handleTelegramUpdate(update, env) {
 
     if (!accountLine) return send(chatId, "❌ Email session expire ho gaya.", env);
 
-    const wait = await send(chatId, "🔍 <i>Inbox me OTP check kiya ja raha hai...</i>", env);
+    const wait = await send(chatId, "🔍 <i>Checking inbox for OTP via Microsoft Graph API...</i>", env);
     const { otp } = await fetchAccountOtp(accountLine, env);
 
     if (otp) {
@@ -403,7 +431,7 @@ async function handleTelegramUpdate(update, env) {
       });
     } else {
       await deleteMsg(chatId, wait?.result?.message_id, env);
-      return send(chatId, `⏳ <b>Abhi tak OTP nahi aaya!</b>\nEmail: <code>${email}</code>\n\nKripya 10-15 second ruk kar Refresh dabayein:`, env, {
+      return send(chatId, `⏳ <b>Abhi tak OTP nahi mila!</b>\nEmail: <code>${email}</code>\n\nKripya 10-15 second ruk kar Refresh dabayein:`, env, {
         inline_keyboard: [
           [{ text: "🔄 Refresh OTP", callback_data: `ref_otp:${encodeURIComponent(email)}` }],
           [{ text: "➡️ Naya Email Le", callback_data: "force_new_email" }]
@@ -411,5 +439,4 @@ async function handleTelegramUpdate(update, env) {
       });
     }
   }
-              }
-    
+}

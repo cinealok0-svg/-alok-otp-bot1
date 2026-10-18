@@ -1,13 +1,9 @@
 /**
- * All-In-One Enterprise Bot (Absolute Ultimate Complete Edition)
- * Features:
- *  - Full Robust Multi-API Hotmail/Outlook & Temp Mail OTP Engine
- *  - Compact UI Text with Full Functionality & Fast Refresh Buttons
- *  - Smart Multi-File Stock Merge, Deduplication & Auto-Purge of Used Accounts
- *  - 🔐 Built-In 2FA TOTP Code Generator & Aesthetic IG Username Generator
- *  - Secure Multi-Admin Access Control & Live Webmail Portal (/inbox)
+ * All-In-One Enterprise Bot (Complete 1000+ Lines Master Edition)
+ * Configured for Cloudflare Workers & Email Routing
  */
 
+// ================= DYNAMIC ENV BINDINGS =================
 let BOT_TOKEN = "";
 let OWNER_ID = "";
 let DB_CHANNEL_ID = "";
@@ -15,27 +11,27 @@ let DONGVAN_API_KEY = "";
 let DEFAULT_DOMAIN = "vibepulsemedia.online";
 let WORKER_ORIGIN = "";
 
-const ADMINS_LIST = new Set();
-
-const REAL_GIRL_NAMES = [
+const FEMALE_FIRST_NAMES = [
   "aanya", "diya", "ishita", "kavya", "khushi", "myra", "pooja", "priya", "riya", "shreya",
-  "sneha", "tanya", "ananya", "simran", "neha", "muskan", "roshni", "komal", "sakshi", "aditi",
-  "lavanya", "suhani", "kritika", "tanvi", "anushka", "dipti", "pallavi", "divya", "mehak", "shruthi",
-  "alia", "deepika", "shraddha", "kiara", "shanaya", "palak", "mahira", "sana", "nisha", "esha"
+  "sneha", "tanya", "ananya", "simran", "neha", "muskan", "roshni", "komal", "sakshi", "aditi"
 ];
+const FEMALE_LAST_NAMES = [
+  "sharma", "verma", "gupta", "mehta", "singh", "patel", "shah", "jain", "kapoor", "reddy", "yadav"
+];
+
+let CACHED_FILE_ID = null;
+let CACHED_LINES = null;
 
 const EMAIL_TO_CHAT = new Map();
 const TEMP_MAIL_HISTORY = new Map();
 
+// ================= UTILITIES =================
 function initEnv(env, requestUrl = "") {
   BOT_TOKEN = env?.BOT_TOKEN || "";
-  OWNER_ID = String(env?.OWNER_ID || "").trim();
-  DB_CHANNEL_ID = String(env?.DB_CHANNEL_ID || "").trim();
+  OWNER_ID = String(env?.OWNER_ID || "");
+  DB_CHANNEL_ID = String(env?.DB_CHANNEL_ID || "");
   DONGVAN_API_KEY = env?.DONGVAN_KEY || "";
   DEFAULT_DOMAIN = (env?.DEFAULT_DOMAIN || "vibepulsemedia.online").toLowerCase().trim();
-
-  if (OWNER_ID) ADMINS_LIST.add(OWNER_ID);
-
   if (requestUrl) {
     try {
       WORKER_ORIGIN = new URL(requestUrl).origin;
@@ -48,7 +44,7 @@ function initEnv(env, requestUrl = "") {
 }
 
 function isAdmin(userId) {
-  return ADMINS_LIST.has(String(userId).trim());
+  return String(userId).trim() === String(OWNER_ID).trim();
 }
 
 function escapeHtml(str) {
@@ -60,9 +56,15 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+function getRandomUser() {
+  const f = FEMALE_FIRST_NAMES[Math.floor(Math.random() * FEMALE_FIRST_NAMES.length)];
+  const l = FEMALE_LAST_NAMES[Math.floor(Math.random() * FEMALE_LAST_NAMES.length)];
+  return `${f}.${l}${Math.floor(10 + Math.random() * 90)}`.toLowerCase();
+}
+
 function generateInstagramUsernames() {
   const list = [];
-  const shuffled = [...REAL_GIRL_NAMES].sort(() => 0.5 - Math.random());
+  const shuffled = [...FEMALE_FIRST_NAMES].sort(() => 0.5 - Math.random());
   
   const patterns = [
     (name) => `${name}_${Math.floor(100 + Math.random() * 900)}`,
@@ -87,7 +89,7 @@ function getLiveInboxUrl(email) {
   return `${base}/inbox?email=${encodeURIComponent(email.toLowerCase().trim())}`;
 }
 
-// 🔐 2FA TOTP GENERATOR
+// ================= 🔐 2FA TOTP GENERATOR ALGORITHM =================
 function base32ToUint8Array(base32) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let cleaned = base32.toUpperCase().replace(/=+$/, "").replace(/\s+/g, "");
@@ -115,7 +117,8 @@ async function generateTotpCode(secret) {
     if (keyBytes.length === 0) return null;
 
     const epoch = Math.floor(Date.now() / 1000);
-    const counter = Math.floor(epoch / 30);
+    const timeStep = 30;
+    const counter = Math.floor(epoch / timeStep);
 
     const buffer = new ArrayBuffer(8);
     const view = new DataView(buffer);
@@ -139,20 +142,43 @@ async function generateTotpCode(secret) {
       ((hmacResult[offset + 2] & 0xFF) << 8) |
       (hmacResult[offset + 3] & 0xFF);
 
-    return String(binary % 1000000).padStart(6, "0");
+    const otp = binary % 1000000;
+    return String(otp).padStart(6, "0");
   } catch (e) {
     return null;
   }
 }
 
+// Service Detector
 function detectService(rawText) {
   const lower = String(rawText || "").toLowerCase();
-  if (lower.includes("instagram") || lower.includes("ig-")) return { name: "Instagram", icon: "📸" };
-  if (lower.includes("facebook") || lower.includes("meta") || lower.includes("fb-")) return { name: "Facebook / Meta", icon: "🌐" };
-  if (lower.includes("whatsapp")) return { name: "WhatsApp", icon: "💬" };
-  if (lower.includes("telegram")) return { name: "Telegram", icon: "✈️" };
-  if (lower.includes("google") || lower.includes("gmail")) return { name: "Google / YouTube", icon: "🔍" };
-  if (lower.includes("microsoft") || lower.includes("outlook") || lower.includes("hotmail")) return { name: "Microsoft", icon: "🪟" };
+  if (lower.includes("instagram") || lower.includes("ig-")) {
+    return { name: "Instagram", icon: "📸" };
+  }
+  if (lower.includes("facebook") || lower.includes("meta") || lower.includes("fb-") || lower.includes("authenticate your profile")) {
+    return { name: "Facebook / Meta", icon: "🌐" };
+  }
+  if (lower.includes("whatsapp")) {
+    return { name: "WhatsApp", icon: "💬" };
+  }
+  if (lower.includes("telegram")) {
+    return { name: "Telegram", icon: "✈️" };
+  }
+  if (lower.includes("google") || lower.includes("gmail") || lower.includes("youtube")) {
+    return { name: "Google / YouTube", icon: "🔍" };
+  }
+  if (lower.includes("twitter") || lower.includes(" x ") || lower.includes("x corp")) {
+    return { name: "Twitter / X", icon: "🐦" };
+  }
+  if (lower.includes("tiktok")) {
+    return { name: "TikTok", icon: "🎵" };
+  }
+  if (lower.includes("microsoft") || lower.includes("outlook") || lower.includes("hotmail")) {
+    return { name: "Microsoft", icon: "🪟" };
+  }
+  if (lower.includes("discord")) {
+    return { name: "Discord", icon: "👾" };
+  }
   return { name: "Online Service", icon: "📩" };
 }
 
@@ -165,37 +191,49 @@ function htmlToCleanText(rawHtml) {
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
     .replace(/<\/div>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#[0-9]+;/g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n+/g, "\n")
     .trim();
 }
 
+// Universal 4, 6, 8 Digit OTP Parser
 function extractSmartOtpAndLink(rawText, subjectText = "", fallbackEmail = "") {
   const combinedRaw = `${subjectText || ""}\n${rawText || ""}`;
   const cleanBody = htmlToCleanText(rawText || "");
   const cleanSubject = htmlToCleanText(subjectText || "");
   const fullClean = `${cleanSubject}\n${cleanBody}`.trim();
 
-  const textWithoutUrls = fullClean.replace(/https?:\/\/[^\s]+/gi, " ").replace(/\b[0-9a-fA-F]{12,}\b/g, " ");
+  const textWithoutUrls = fullClean
+    .replace(/https?:\/\/[^\s]+/gi, " ")
+    .replace(/\b[0-9a-fA-F]{12,}\b/g, " ");
+
   let otp = null;
 
   const subjMatch =
     cleanSubject.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{8})\b/) ||
     cleanSubject.match(/\b(?!(?:19\d\d|20\d\d)\b)([0-9]{6})\b/) ||
-    cleanSubject.match(/(?:code|otp|pin|passcode|código)\D{0,12}\b([0-9]{4,8})\b/i);
+    cleanSubject.match(/(?:code|otp|pin|passcode|código)\D{0,12}\b([0-9]{4,8})\b/i) ||
+    cleanSubject.match(/\b([0-9]{4,8})\b\D{0,12}(?:is your|confirmation|verification|code)/i);
 
-  if (subjMatch) otp = subjMatch[1] || subjMatch[0];
+  if (subjMatch) {
+    otp = subjMatch[1] || subjMatch[0];
+  }
 
   if (!otp) {
     const kwMatch =
       textWithoutUrls.match(/(?:code|otp|pin|passcode|confirmation|verification|authenticate|security|código)\D{0,30}\b([0-9]{8})\b/i) ||
-      textWithoutUrls.match(/(?:code|otp|pin|passcode|confirmation|verification|authenticate|security|código)\D{0,30}\b([0-9]{6})\b/i);
+      textWithoutUrls.match(/(?:code|otp|pin|passcode|confirmation|verification|authenticate|security|código)\D{0,30}\b([0-9]{6})\b/i) ||
+      textWithoutUrls.match(/\b([0-9]{8})\b\D{0,30}(?:is your|code|otp|confirmation|verification|authenticate)/i) ||
+      textWithoutUrls.match(/\b([0-9]{6})\b\D{0,30}(?:is your|code|otp|confirmation|verification|authenticate)/i);
     if (kwMatch) otp = kwMatch[1];
   }
 
@@ -208,16 +246,24 @@ function extractSmartOtpAndLink(rawText, subjectText = "", fallbackEmail = "") {
   }
 
   let link = null;
-  const urlMatch = combinedRaw.match(/https?:\/\/[^\s<>"']+(?:verify|confirm|activate|token|validation|login_code|checkpoint)[^\s<>"']*/i);
+  const urlMatch =
+    combinedRaw.match(/https?:\/\/[^\s<>"']+(?:verify|confirm|activate|token|validation|login_code|checkpoint|recover)[^\s<>"']*/i) ||
+    combinedRaw.match(/https?:\/\/[^\s<>"']+(?:action=verify|auth=|code=)[^\s<>"']*/i);
+
   if (urlMatch) {
-    link = urlMatch[0].replace(/&amp;/g, "&").replace(/['\");]+$/, "");
+    link = urlMatch[0].replace(/&amp;/g, "&").replace(/[.,;)"'>]+$/, "");
   } else if (fallbackEmail) {
     link = getLiveInboxUrl(fallbackEmail);
   }
 
-  const snippet = cleanBody.split("\n").map(l => l.trim()).filter(l => l.length > 2).slice(0, 3).join(" ").slice(0, 160);
-  const service = detectService(`${cleanSubject} ${cleanBody.slice(0, 400)}`);
-  return { otp, link, service, subject: cleanSubject || "New Mail", snippet };
+  const snippetLines = cleanBody
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l.length > 2 && !l.toLowerCase().startsWith("unsubscribe"));
+  const snippet = snippetLines.slice(0, 6).join("\n").slice(0, 320);
+
+  const service = detectService(`${cleanSubject} ${cleanBody.slice(0, 600)}`);
+  return { otp, link, service, subject: cleanSubject || "New Incoming Mail", snippet: snippet || cleanSubject };
 }
 
 function parseRawMimeEmail(rawEmail) {
@@ -231,11 +277,15 @@ function parseRawMimeEmail(rawEmail) {
     return str.replace(/=\?([^?]+)\?([BQbq])\?([^?]+)\?=/g, (_, charset, enc, data) => {
       try {
         if (enc.toUpperCase() === "B") {
-          return decodeURIComponent(escape(atob(data.replace(/\s+/g, ""))));
+          const bin = atob(data.replace(/\s+/g, ""));
+          return decodeURIComponent(escape(bin));
         } else {
-          return decodeURIComponent(escape(data.replace(/_/g, " ").replace(/=([0-9A-Fa-f]{2})/g, (__, h) => String.fromCharCode(parseInt(h, 16)))));
+          const qp = data.replace(/_/g, " ").replace(/=([0-9A-Fa-f]{2})/g, (__, h) => String.fromCharCode(parseInt(h, 16)));
+          return decodeURIComponent(escape(qp));
         }
-      } catch (e) { return data; }
+      } catch (e) {
+        return data;
+      }
     });
   };
 
@@ -244,18 +294,36 @@ function parseRawMimeEmail(rawEmail) {
   const subject = decodeHeader(subjMatch ? subjMatch[1].replace(/\r?\n[ \t]+/g, " ").trim() : "");
   const from = decodeHeader(fromMatch ? fromMatch[1].replace(/\r?\n[ \t]+/g, " ").trim() : "");
 
+  const decodeQP = (str) =>
+    str
+      .replace(/=\r?\n/g, "")
+      .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+
   let decodedChunks = [];
   const b64Regex = /Content-Transfer-Encoding:\s*base64[\s\S]*?\r?\n\r?\n([\s\S]*?)(?:\r?\n--|$)/gi;
   let bMatch;
   while ((bMatch = b64Regex.exec(rawEmail)) !== null) {
     try {
       const cleanB64 = bMatch[1].replace(/[^A-Za-z0-9+/=]/g, "");
-      if (cleanB64.length > 8) decodedChunks.push(atob(cleanB64));
+      if (cleanB64.length > 8) {
+        const bin = atob(cleanB64);
+        try {
+          decodedChunks.push(decodeURIComponent(escape(bin)));
+        } catch (e) {
+          decodedChunks.push(bin);
+        }
+      }
     } catch (e) {}
   }
-  decodedChunks.push(rawBody.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))));
+
+  decodedChunks.push(decodeQP(rawBody));
   const fullDecoded = decodedChunks.join("\n");
-  return { subject, from, bodyText: htmlToCleanText(fullDecoded), bodyHtml: fullDecoded };
+  return {
+    subject,
+    from,
+    bodyText: htmlToCleanText(fullDecoded),
+    bodyHtml: fullDecoded
+  };
 }
 
 function parseStrictStockLines(rawContent) {
@@ -263,6 +331,7 @@ function parseStrictStockLines(rawContent) {
   const lines = rawContent.split(/\r?\n/);
   const valid = [];
   const seen = new Set();
+
   for (let l of lines) {
     l = l.trim();
     if (l.length > 5 && l.includes("@") && (l.includes("|") || l.includes(":"))) {
@@ -276,7 +345,7 @@ function parseStrictStockLines(rawContent) {
   return valid;
 }
 
-// ROBUST OUTLOOK / HOTMAIL RESOLVER WITH MULTI-API FALLBACK
+// ================= HOTMAIL / OUTLOOK RESOLVER =================
 async function getOAuth2MailboxMessages(accountLine) {
   if (!accountLine) return [];
   const rawLine = accountLine.trim();
@@ -297,42 +366,68 @@ async function getOAuth2MailboxMessages(accountLine) {
   const messages = [];
 
   if (refreshToken) {
-    try {
-      const tokenRes = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ client_id: clientId, grant_type: "refresh_token", refresh_token: refreshToken }).toString()
-      });
-      if (tokenRes.ok) {
-        const tokenJson = await tokenRes.json();
-        const accessToken = tokenJson.access_token;
-        if (accessToken) {
-          const mailRes = await fetch("https://graph.microsoft.com/v1.0/me/messages?$top=10&$select=id,subject,from,receivedDateTime,bodyPreview,body", {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          });
-          if (mailRes.ok) {
-            const mailData = await mailRes.json();
-            for (const m of (mailData.value || [])) {
-              const subj = m.subject || "";
-              const bodyContent = m.body?.content || m.bodyPreview || "";
-              const parsed = extractSmartOtpAndLink(bodyContent, subj, email);
-              messages.push({
-                id: m.id || String(Math.random()),
-                subject: subj || parsed.subject,
-                from: m.from?.emailAddress?.address || "Microsoft",
-                snippet: parsed.snippet,
-                html: bodyContent,
-                otp: parsed.otp,
-                link: parsed.link,
-                service: parsed.service,
-                time: m.receivedDateTime || new Date().toISOString()
-              });
+    const tokenEndpoints = [
+      {
+        url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        body: new URLSearchParams({ client_id: clientId, grant_type: "refresh_token", refresh_token: refreshToken })
+      },
+      {
+        url: "https://login.live.com/oauth20_token.srf",
+        body: new URLSearchParams({ client_id: clientId, grant_type: "refresh_token", refresh_token: refreshToken })
+      }
+    ];
+
+    for (const ep of tokenEndpoints) {
+      try {
+        const tokenRes = await fetch(ep.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: ep.body.toString()
+        });
+
+        if (tokenRes.ok) {
+          const tokenJson = await tokenRes.json();
+          const accessToken = tokenJson.access_token;
+          if (accessToken) {
+            const mailApis = [
+              "https://graph.microsoft.com/v1.0/me/messages?$top=5&$select=id,subject,from,receivedDateTime,bodyPreview,body",
+              "https://outlook.office.com/api/v2.0/me/messages?$top=5&$select=Id,Subject,From,ReceivedDateTime,BodyPreview,Body"
+            ];
+
+            for (const apiUrl of mailApis) {
+              try {
+                const mailRes = await fetch(apiUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+                if (mailRes.ok) {
+                  const mailData = await mailRes.json();
+                  const list = mailData.value || [];
+                  if (list.length > 0) {
+                    for (const m of list) {
+                      const subj = m.subject || m.Subject || "";
+                      const bodyContent = m.body?.content || m.Body?.Content || m.bodyPreview || m.BodyPreview || "";
+                      const fromAddr = m.from?.emailAddress?.address || m.From?.EmailAddress?.Address || "Inbox";
+                      const parsed = extractSmartOtpAndLink(bodyContent, subj, email);
+
+                      messages.push({
+                        id: m.id || m.Id || String(Math.random()),
+                        subject: subj || parsed.subject,
+                        from: fromAddr,
+                        snippet: parsed.snippet,
+                        html: bodyContent,
+                        otp: parsed.otp,
+                        link: parsed.link,
+                        service: parsed.service,
+                        time: m.receivedDateTime || m.ReceivedDateTime || new Date().toISOString()
+                      });
+                    }
+                    return messages;
+                  }
+                }
+              } catch (e) {}
             }
-            if (messages.length > 0) return messages;
           }
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
 
     try {
       const dvPostRes = await fetch("https://tools.dongvanfb.net/api/graph_messages", {
@@ -340,60 +435,69 @@ async function getOAuth2MailboxMessages(accountLine) {
         headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
         body: JSON.stringify({ email, refresh_token: refreshToken, client_id: clientId })
       });
+
       if (dvPostRes.ok) {
         const dvJson = await dvPostRes.json();
-        const dvList = dvJson.messages || dvJson.data || [];
-        for (const m of dvList.slice(0, 10)) {
-          const subj = m.subject || "";
-          const bodyContent = m.body?.content || m.bodyPreview || "";
-          const parsed = extractSmartOtpAndLink(bodyContent, subj, email);
-          messages.push({
-            id: m.id || String(Math.random()),
-            subject: subj || parsed.subject,
-            from: "Inbox",
-            snippet: parsed.snippet,
-            html: bodyContent,
-            otp: parsed.otp,
-            link: parsed.link,
-            service: parsed.service,
-            time: m.receivedDateTime || new Date().toISOString()
-          });
+        const dvList = dvJson.messages || dvJson.data || dvJson.value || [];
+        if (Array.isArray(dvList) && dvList.length > 0) {
+          for (const m of dvList.slice(0, 5)) {
+            const subj = m.subject || m.Subject || "";
+            const bodyContent = m.body?.content || m.body || m.bodyPreview || m.content || "";
+            const parsed = extractSmartOtpAndLink(bodyContent, subj, email);
+
+            messages.push({
+              id: m.id || String(Math.random()),
+              subject: subj || parsed.subject,
+              from: m.from?.emailAddress?.address || "Inbox",
+              snippet: parsed.snippet,
+              html: bodyContent,
+              otp: parsed.otp,
+              link: parsed.link,
+              service: parsed.service,
+              time: m.receivedDateTime || new Date().toISOString()
+            });
+          }
+          if (messages.length > 0) return messages;
         }
-        if (messages.length > 0) return messages;
       }
     } catch (e) {}
   }
 
-  try {
-    const dvUrl = DONGVAN_API_KEY 
-      ? `https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(rawLine)}`
-      : `https://tools.dongvanfb.net/api/get_code?mail=${encodeURIComponent(rawLine)}`;
-    
-    const res = await fetch(dvUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (res.ok) {
-      const txt = await res.text();
-      let json = null;
-      try { json = JSON.parse(txt); } catch (e) {}
-      
-      const directCode = json?.code || json?.otp || json?.data?.code || json?.message;
-      const parsed = extractSmartOtpAndLink(txt, json?.subject || json?.title || "", email);
-      
-      if (directCode || parsed.otp) {
-        messages.push({
-          id: String(Date.now()),
-          subject: json?.subject || parsed.subject,
-          from: "Hotmail",
-          snippet: parsed.snippet,
-          html: txt,
-          otp: String(directCode || parsed.otp),
-          link: getLiveInboxUrl(email),
-          service: detectService(txt),
-          time: new Date().toISOString()
-        });
-        return messages;
+  const urls = [
+    `https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(rawLine)}`,
+    `https://api.dongvanfb.com/api/get_code?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(email)}`,
+    `https://dongvanfb.net/read_mail_box/api.php?apikey=${DONGVAN_API_KEY}&email=${encodeURIComponent(rawLine)}&type=oauth2`
+  ];
+
+  for (const u of urls) {
+    try {
+      const res = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0" } });
+      if (res.ok) {
+        const txt = await res.text();
+        let json = null;
+        try { json = JSON.parse(txt); } catch (e) {}
+
+        const directCode = json?.code || json?.otp || json?.data?.code || json?.data?.otp;
+        const fullMailText = json?.content || json?.message || txt;
+        const parsed = extractSmartOtpAndLink(fullMailText, json?.subject || "", email);
+
+        if (directCode || parsed.otp) {
+          messages.push({
+            id: String(Date.now()),
+            subject: json?.subject || parsed.subject,
+            from: "Hotmail / Outlook",
+            snippet: parsed.snippet,
+            html: fullMailText,
+            otp: String(directCode || parsed.otp),
+            link: getLiveInboxUrl(email),
+            service: detectService(fullMailText),
+            time: new Date().toISOString()
+          });
+          return messages;
+        }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
 
   return messages;
 }
@@ -401,35 +505,48 @@ async function getOAuth2MailboxMessages(accountLine) {
 async function getOAuth2MailboxOtp(accountLine) {
   const email = (accountLine || "").split(/[|:]/)[0]?.trim() || "";
   const msgs = await getOAuth2MailboxMessages(accountLine);
+
   if (msgs.length > 0) {
     TEMP_MAIL_HISTORY.set(email.toLowerCase(), msgs);
     const withOtp = msgs.find(m => m.otp) || msgs[0];
-    return { otp: withOtp?.otp || null, link: withOtp?.link || getLiveInboxUrl(email), service: withOtp?.service || detectService(""), subject: withOtp?.subject || null, snippet: withOtp?.snippet || null, allMessages: msgs };
+    return {
+      otp: withOtp.otp,
+      link: withOtp.link || getLiveInboxUrl(email),
+      service: withOtp.service,
+      subject: withOtp.subject,
+      snippet: withOtp.snippet,
+      allMessages: msgs
+    };
   }
+
   return { otp: null, link: getLiveInboxUrl(email), service: detectService(""), subject: null, snippet: null, allMessages: [] };
 }
 
+// ================= CUSTOM DOMAIN STATE STORE =================
 async function saveTempMailState(email, chatId, newMsgRecord = null, telegramApi) {
   const cleanEmail = email.toLowerCase().trim();
   if (chatId) EMAIL_TO_CHAT.set(cleanEmail, String(chatId));
 
   if (newMsgRecord) {
     const existing = TEMP_MAIL_HISTORY.get(cleanEmail) || [];
-    TEMP_MAIL_HISTORY.set(cleanEmail, [newMsgRecord, ...existing.filter(m => m.id !== newMsgRecord.id)].slice(0, 10));
+    const updated = [newMsgRecord, ...existing.filter(m => m.id !== newMsgRecord.id)].slice(0, 10);
+    TEMP_MAIL_HISTORY.set(cleanEmail, updated);
   }
 
   try {
     const userPart = cleanEmail.split("@")[0];
     let desc = "";
     if (newMsgRecord) {
-      const safeSubj = (newMsgRecord.subject || "Mail").replace(/[|\r\n]/g, " ").slice(0, 30);
-      desc = `MSG|${userPart}|${newMsgRecord.otp || "NONE"}|${newMsgRecord.service?.name || "Service"}|${chatId || ""}|${newMsgRecord.id}|${safeSubj}`;
+      const safeSubj = (newMsgRecord.subject || "Mail").replace(/[|\r\n]/g, " ").slice(0, 40);
+      const safeSnip = (newMsgRecord.snippet || "").replace(/[|\r\n]/g, " ").slice(0, 90);
+      desc = `MSG|${userPart}|${newMsgRecord.otp || "NONE"}|${newMsgRecord.service?.name || "Service"}|${chatId || ""}|${newMsgRecord.id}|${safeSubj}|${safeSnip}`;
     } else if (chatId) {
       desc = `MAP|${userPart}|${chatId}`;
     }
     if (desc && DB_CHANNEL_ID && telegramApi) {
       await fetch(`${telegramApi}/setChatDescription`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: DB_CHANNEL_ID, description: desc.slice(0, 250) })
       }).catch(() => {});
     }
@@ -439,6 +556,7 @@ async function saveTempMailState(email, chatId, newMsgRecord = null, telegramApi
 async function getTempMailMessages(email, telegramApi) {
   const cleanEmail = email.toLowerCase().trim();
   const localList = TEMP_MAIL_HISTORY.get(cleanEmail) || [];
+
   try {
     if (DB_CHANNEL_ID && telegramApi) {
       const res = await fetch(`${telegramApi}/getChat?chat_id=${DB_CHANNEL_ID}`).then(r => r.json());
@@ -447,18 +565,31 @@ async function getTempMailMessages(email, telegramApi) {
       if (desc.startsWith(`MSG|${userPart}|`)) {
         const parts = desc.split("|");
         const otp = parts[2] !== "NONE" ? parts[2] : null;
-        const sName = parts[3] || "Service";
+        const sName = parts[3] || "Online Service";
         const msgId = parts[5] || "sync_1";
-        const subj = parts[6] || "Mail";
+        const subj = parts[6] || "Incoming Email";
+        const snip = parts[7] || "";
+
         if (!localList.some(m => m.id === msgId)) {
-          localList.unshift({
-            id: msgId, subject: subj, from: sName, snippet: subj, html: subj, otp, link: getLiveInboxUrl(cleanEmail), service: detectService(sName), time: "Just now", pushed: true
-          });
+          const syncedMsg = {
+            id: msgId,
+            subject: subj,
+            from: sName,
+            snippet: snip,
+            html: `<p><b>${escapeHtml(subj)}</b></p><p>${escapeHtml(snip)}</p>`,
+            otp: otp,
+            link: getLiveInboxUrl(cleanEmail),
+            service: detectService(sName),
+            time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }),
+            pushed: true
+          };
+          localList.unshift(syncedMsg);
           TEMP_MAIL_HISTORY.set(cleanEmail, localList.slice(0, 10));
         }
       }
     }
   } catch (e) {}
+
   return localList;
 }
 
@@ -470,49 +601,77 @@ async function resolveTargetChatForEmail(email, telegramApi) {
       const res = await fetch(`${telegramApi}/getChat?chat_id=${DB_CHANNEL_ID}`).then(r => r.json());
       const desc = res?.result?.description || "";
       const userPart = cleanEmail.split("@")[0];
-      if (desc.startsWith(`MAP|${userPart}|`)) return desc.split("|")[2];
-      if (desc.startsWith(`MSG|${userPart}|`)) return desc.split("|")[4];
+      if (desc.startsWith(`MAP|${userPart}|`)) {
+        const parts = desc.split("|");
+        if (parts[2]) return parts[2];
+      }
+      if (desc.startsWith(`MSG|${userPart}|`)) {
+        const parts = desc.split("|");
+        if (parts[4]) return parts[4];
+      }
     }
   } catch (e) {}
   return OWNER_ID || null;
 }
 
-function buildShortMailAlert(email, msgObj) {
+function buildRichMailAlert(email, msgObj, isTempMail = false) {
   const sName = msgObj.service?.name || "Online Service";
   const sIcon = msgObj.service?.icon || "📩";
   const otp = msgObj.otp;
+  const subject = msgObj.subject || "New Message";
+  const snippet = msgObj.snippet || "";
   const liveInboxUrl = getLiveInboxUrl(email);
 
-  let text = `🔔 <b>${sIcon} ${escapeHtml(sName.toUpperCase())} OTP RECEIVED!</b>\n`;
+  let text =
+    `🔔 <b>${sIcon} ${escapeHtml(sName.toUpperCase())} MAIL RECEIVED!</b>\n` +
+    `━━━━━━━━━━━━━━━━━━\n` +
+    `📧 <b>Email:</b> <code>${escapeHtml(email)}</code>\n` +
+    `📌 <b>Subject:</b> <b>${escapeHtml(subject.slice(0, 90))}</b>\n`;
+
   if (otp) {
-    text += `🔑 <b>OTP:</b> <code>${escapeHtml(otp)}</code>\n`;
+    text += `🔑 <b>OTP Code:</b> <code>${escapeHtml(otp)}</code>\n`;
+  } else {
+    text += `ℹ️ <b>OTP Status:</b> <i>Code niche message text me dekhein</i>\n`;
   }
-  text += `📧 <code>${escapeHtml(email)}</code>`;
+
+  if (snippet) {
+    text += `\n📄 <b>Message Text:</b>\n<pre>${escapeHtml(snippet.slice(0, 280))}</pre>\n`;
+  }
 
   const kbRows = [];
   if (otp) {
-    kbRows.push([{ text: `📋 COPY OTP: ${otp}`, copy_text: { text: String(otp) } }]);
+    kbRows.push([{ text: `📋 TAP TO COPY OTP: ${otp}`, copy_text: { text: String(otp) } }]);
   }
-  kbRows.push([
-    { text: "🔄 Get OTP / Refresh", callback_data: `chk_mail:${email}` },
-    { text: "🌐 Live Inbox", url: liveInboxUrl }
-  ]);
-  kbRows.push([
-    { text: "⚡ Naya Temp Mail", callback_data: "gen_temp" },
-    { text: "🏠 Home", callback_data: "home" }
-  ]);
+  kbRows.push([{ text: "🌐 Live Inbox Page (See Full Mail)", url: liveInboxUrl }]);
+  if (msgObj.link && msgObj.link !== liveInboxUrl) {
+    kbRows.push([{ text: "🔗 Direct Verification Link", url: msgObj.link }]);
+  }
+
+  if (isTempMail) {
+    kbRows.push([
+      { text: "🔄 Check New Mail", callback_data: `chk_temp:${email}` },
+      { text: "⚡ Naya Temp Mail", callback_data: "gen_temp" }
+    ]);
+  } else {
+    kbRows.push([
+      { text: "🔄 Refresh Inbox", callback_data: `chk_mail:${email}` },
+      { text: "🔥 Next Account", callback_data: "get_stock" }
+    ]);
+  }
+  kbRows.push([{ text: "🏠 Home", callback_data: "home" }]);
 
   return { text, reply_markup: { inline_keyboard: kbRows } };
 }
 
+// ================= BACKGROUND LISTENERS =================
 async function startOAuthAutoPush(chatId, accountData, telegramApi) {
   const email = accountData.split(/[|:]/)[0]?.trim();
   for (let i = 0; i < 15; i++) {
     await sleep(3000);
     const res = await getOAuth2MailboxOtp(accountData);
     if (res.otp || (res.allMessages && res.allMessages.length > 0)) {
-      const latestMsg = res.allMessages[0] || { otp: res.otp, subject: res.subject, snippet: res.snippet, service: res.service };
-      const alert = buildShortMailAlert(email, latestMsg);
+      const latestMsg = res.allMessages[0] || { otp: res.otp, subject: res.subject, snippet: res.snippet, link: res.link, service: res.service };
+      const alert = buildRichMailAlert(email, latestMsg, false);
       await send(chatId, alert.text, telegramApi, alert.reply_markup);
       break;
     }
@@ -528,25 +687,32 @@ async function startTempMailAutoPush(chatId, email, telegramApi, baselineTopId =
       const newest = list[0];
       if (baselineTopId && newest.id === baselineTopId) continue;
       if (newest.pushed) break;
+
       newest.pushed = true;
       TEMP_MAIL_HISTORY.set(cleanEmail, list);
 
-      const alert = buildShortMailAlert(cleanEmail, newest);
+      const alert = buildRichMailAlert(cleanEmail, newest, true);
       await send(chatId, alert.text, telegramApi, alert.reply_markup);
       break;
     }
   }
 }
 
+// ================= DATABASE HELPERS =================
 async function getChannelDbState(telegramApi) {
   try {
     const res = await fetch(`${telegramApi}/getChat?chat_id=${DB_CHANNEL_ID}`).then(r => r.json());
     const pinned = res?.result?.pinned_message?.text || "";
+
     if (pinned.includes("DB_STORE:")) {
+      const matchFile = pinned.match(/FILE:([a-zA-Z0-9_-]+)/);
+      const matchIdx = pinned.match(/IDX:(\d+)/);
+      const matchTotal = pinned.match(/TOTAL:(\d+)/);
+
       return {
-        fileId: pinned.match(/FILE:([a-zA-Z0-9_-]+)/)?.[1] || null,
-        index: parseInt(pinned.match(/IDX:(\d+)/)?.[1] || "0", 10),
-        total: parseInt(pinned.match(/TOTAL:(\d+)/)?.[1] || "0", 10),
+        fileId: matchFile ? matchFile[1] : null,
+        index: matchIdx ? parseInt(matchIdx[1], 10) : 0,
+        total: matchTotal ? parseInt(matchTotal[1], 10) : 0,
         msgId: res.result.pinned_message.message_id
       };
     }
@@ -555,13 +721,16 @@ async function getChannelDbState(telegramApi) {
 }
 
 async function loadChannelFileLines(fileId, telegramApi) {
-  try {
-    const fileInfo = await fetch(`${telegramApi}/getFile?file_id=${fileId}`).then(r => r.json());
-    const content = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
-    return parseStrictStockLines(content);
-  } catch (e) {
-    return [];
+  if (CACHED_FILE_ID === fileId && CACHED_LINES && CACHED_LINES.length > 0) {
+    return CACHED_LINES;
   }
+  const fileInfo = await fetch(`${telegramApi}/getFile?file_id=${fileId}`).then(r => r.json());
+  const content = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
+  const lines = parseStrictStockLines(content);
+
+  CACHED_FILE_ID = fileId;
+  CACHED_LINES = lines;
+  return lines;
 }
 
 async function findAccountLineByEmail(queryEmail, telegramApi) {
@@ -577,10 +746,18 @@ async function findAccountLineByEmail(queryEmail, telegramApi) {
 
 async function updateChannelDb(fileId, newIndex, total, msgId, telegramApi) {
   const remaining = Math.max(0, total - newIndex);
-  const dbText = `🗄️ <b>STOCK LEDGER</b>\n📦 Total: <code>${total}</code> | Out: <code>${newIndex}</code> | Left: <code>${remaining}</code>\n\n<code>DB_STORE: FILE:${fileId} IDX:${newIndex} TOTAL:${total}</code>`;
+  const dbText =
+    `🗄️ <b>MASTER STOCK DATABASE (CHANNEL LEDGER)</b>\n` +
+    `━━━━━━━━━━━━━━━━━━\n` +
+    `📦 Total Valid Stock: <code>${total}</code>\n` +
+    `📤 Total Dispensed: <code>${newIndex}</code>\n` +
+    `✅ Fresh Stock Baaki: <code>${remaining}</code>\n\n` +
+    `<code>DB_STORE: FILE:${fileId} IDX:${newIndex} TOTAL:${total}</code>`;
+
   if (msgId) {
     await fetch(`${telegramApi}/editMessageText`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: DB_CHANNEL_ID, message_id: msgId, text: dbText, parse_mode: "HTML" })
     }).catch(() => {});
   }
@@ -589,49 +766,128 @@ async function updateChannelDb(fileId, newIndex, total, msgId, telegramApi) {
 async function send(chatId, text, telegramApi, reply_markup = null) {
   const payload = { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true };
   if (reply_markup) payload.reply_markup = reply_markup;
-  return fetch(`${telegramApi}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
+  return fetch(`${telegramApi}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).catch(() => null);
 }
 
 async function edit(chatId, messageId, text, telegramApi, reply_markup = null) {
   if (!messageId) return send(chatId, text, telegramApi, reply_markup);
   const payload = { chat_id: chatId, message_id: messageId, text, parse_mode: "HTML", disable_web_page_preview: true };
   if (reply_markup) payload.reply_markup = reply_markup;
-  return fetch(`${telegramApi}/editMessageText`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
+  return fetch(`${telegramApi}/editMessageText`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).catch(() => null);
 }
 
 async function deleteMessage(chatId, messageId, telegramApi) {
   if (!messageId) return;
-  return fetch(`${telegramApi}/deleteMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId }) }).catch(() => null);
+  return fetch(`${telegramApi}/deleteMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId })
+  }).catch(() => null);
 }
 
+// ================= LIVE WEBMAIL PAGE RENDERER (/inbox?email=...) =================
 async function renderLiveWebmailPage(emailQuery, telegramApi) {
   const cleanEmail = (emailQuery || "").toLowerCase().trim();
   if (!cleanEmail || !cleanEmail.includes("@")) return new Response("Invalid Email", { status: 400 });
 
   const domain = cleanEmail.split("@")[1] || "";
-  let messages = domain === DEFAULT_DOMAIN ? await getTempMailMessages(cleanEmail, telegramApi) : await getOAuth2MailboxMessages(await findAccountLineByEmail(cleanEmail, telegramApi));
+  let messages = [];
 
-  const cardsHtml = messages.length === 0
-    ? `<div style="text-align:center;padding:40px;color:#94a3b8;">📭 Abhi koi message nahi aaya hai. (Auto-refresh: 6s)</div>`
-    : messages.map((m, idx) => `
-        <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px;margin-bottom:12px;">
-          <div style="font-size:12px;color:#38bdf8;margin-bottom:6px;">#${idx + 1} ${escapeHtml(m.service?.name || "Mail")}</div>
-          <div style="font-size:15px;font-weight:700;margin-bottom:6px;">${escapeHtml(m.subject || "No Subject")}</div>
-          ${m.otp ? `<div style="background:#065f46;color:#ecfdf5;padding:8px;border-radius:8px;font-weight:bold;margin-bottom:8px;cursor:pointer;" onclick="navigator.clipboard.writeText('${escapeHtml(m.otp)}');this.innerText='✅ COPIED: ${escapeHtml(m.otp)}'">🔑 OTP: ${escapeHtml(m.otp)} (Tap to Copy)</div>` : ""}
-          <div style="font-size:13px;color:#cbd5e1;white-space:pre-wrap;">${escapeHtml(m.snippet || m.html || "")}</div>
-        </div>`).join("");
+  if (domain === DEFAULT_DOMAIN) {
+    messages = await getTempMailMessages(cleanEmail, telegramApi);
+  } else {
+    const accountLine = await findAccountLineByEmail(cleanEmail, telegramApi);
+    messages = await getOAuth2MailboxMessages(accountLine);
+  }
 
-  return new Response(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="6"><title>Inbox - ${escapeHtml(cleanEmail)}</title><style>body{background:#0f172a;color:#f8fafc;font-family:sans-serif;padding:16px;margin:0;}</style></head><body><div style="max-width:600px;margin:0 auto;"><div style="background:#1e293b;padding:14px;border-radius:12px;margin-bottom:14px;"><div style="font-size:11px;color:#94a3b8;">LIVE INBOX</div><div style="font-size:14px;font-weight:bold;color:#38bdf8;word-break:break-all;">${escapeHtml(cleanEmail)}</div></div>${cardsHtml}</div></body></html>`, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  const cardsHtml =
+    messages.length === 0
+      ? `<div class="empty-box"><h3>📭 Abhi Koi Message Nahi Aaya Hai</h3><p>Yeh page har 6 second me auto-refresh hota hai.</p></div>`
+      : messages
+          .map((m, idx) => {
+            const otpBadge = m.otp
+              ? `<div class="otp-banner" onclick="navigator.clipboard.writeText('${escapeHtml(m.otp)}');this.innerText='✅ COPIED: ${escapeHtml(m.otp)}'">
+                  🔑 DETECTED OTP: <span>${escapeHtml(m.otp)}</span> (Tap to Copy)
+                 </div>`
+              : "";
+            return `
+            <div class="mail-card">
+              <div class="mail-header">
+                <span class="badge">#${idx + 1} ${escapeHtml(m.service?.icon || "📩")} ${escapeHtml(m.service?.name || "Mail")}</span>
+                <span class="time">${escapeHtml(m.time || "Just now")}</span>
+              </div>
+              <div class="subject">${escapeHtml(m.subject || "No Subject")}</div>
+              <div class="from">From: ${escapeHtml(m.from || "Sender")}</div>
+              ${otpBadge}
+              <div class="body-box">${escapeHtml(m.snippet || htmlToCleanText(m.html || ""))}</div>
+            </div>`;
+          })
+          .join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="refresh" content="6" />
+  <title>Live Webmail - ${escapeHtml(cleanEmail)}</title>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, sans-serif; }
+    body { background: #0f172a; color: #f8fafc; margin: 0; padding: 16px; }
+    .container { max-width: 680px; margin: 0 auto; }
+    .top-bar { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .email-title { font-size: 15px; font-weight: 700; color: #38bdf8; word-break: break-all; }
+    .refresh-btn { background: #2563eb; color: #fff; border: none; padding: 8px 14px; border-radius: 8px; font-weight: 600; cursor: pointer; text-decoration: none; font-size: 13px; }
+    .empty-box { background: #1e293b; border: 1px dashed #475569; border-radius: 14px; padding: 40px 20px; text-align: center; color: #94a3b8; }
+    .mail-card { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+    .mail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; color: #94a3b8; }
+    .badge { background: #0f172a; color: #38bdf8; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
+    .subject { font-size: 16px; font-weight: 700; color: #f1f5f9; margin-bottom: 4px; }
+    .from { font-size: 12px; color: #94a3b8; margin-bottom: 12px; }
+    .otp-banner { background: #065f46; border: 1px solid #10b981; color: #ecfdf5; padding: 10px 14px; border-radius: 10px; font-weight: 700; font-size: 15px; margin-bottom: 12px; cursor: pointer; text-align: center; }
+    .otp-banner span { font-size: 20px; color: #fde047; letter-spacing: 2px; margin-left: 6px; }
+    .body-box { background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 12px; font-size: 14px; line-height: 1.5; color: #e2e8f0; white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="top-bar">
+      <div>
+        <div style="font-size:12px;color:#94a3b8;">🌐 LIVE INBOX (Auto-Refresh: 6s)</div>
+        <div class="email-title">${escapeHtml(cleanEmail)}</div>
+      </div>
+      <a class="refresh-btn" href="/inbox?email=${encodeURIComponent(cleanEmail)}">🔄 Refresh Now</a>
+    </div>
+    ${cardsHtml}
+  </div>
+</body>
+</html>`;
+
+  return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
+// ================= WORKER ENTRY =================
 export default {
   async fetch(request, env, ctx) {
     initEnv(env, request.url);
     const url = new URL(request.url);
     const telegramApi = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-    if (url.pathname === "/inbox") return renderLiveWebmailPage(url.searchParams.get("email") || "", telegramApi);
-    if (request.method !== "POST") return new Response("Bot Engine OK", { status: 200 });
+    if (url.pathname === "/inbox") {
+      return renderLiveWebmailPage(url.searchParams.get("email") || "", telegramApi);
+    }
+
+    if (request.method !== "POST") {
+      return new Response(`AlokMail Pro Engine Running. Domain: @${DEFAULT_DOMAIN}`, { status: 200 });
+    }
 
     try {
       const update = await request.json();
@@ -643,34 +899,39 @@ export default {
   async email(message, env, ctx) {
     initEnv(env);
     const telegramApi = `https://api.telegram.org/bot${BOT_TOKEN}`;
+
     try {
       const toEmail = String(message.to || "").toLowerCase().trim();
       const rawEmail = await new Response(message.raw).text();
       const mime = parseRawMimeEmail(rawEmail);
+
       const parsed = extractSmartOtpAndLink(mime.bodyHtml || mime.bodyText, mime.subject, toEmail);
       const targetChatId = await resolveTargetChatForEmail(toEmail, telegramApi);
 
       const msgRecord = {
         id: `${Date.now()}_${Math.floor(100 + Math.random() * 899)}`,
         subject: mime.subject || parsed.subject,
-        snippet: parsed.snippet || mime.bodyText.slice(0, 200),
+        from: mime.from || parsed.service?.name || "Sender",
+        snippet: parsed.snippet || mime.bodyText.slice(0, 300),
         html: mime.bodyHtml || mime.bodyText,
         otp: parsed.otp,
         link: parsed.link,
         service: parsed.service,
-        time: new Date().toLocaleTimeString(),
+        time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }),
         pushed: Boolean(targetChatId)
       };
 
       await saveTempMailState(toEmail, targetChatId, msgRecord, telegramApi);
+
       if (targetChatId) {
-        const alert = buildShortMailAlert(toEmail, msgRecord);
+        const alert = buildRichMailAlert(toEmail, msgRecord, true);
         await send(targetChatId, alert.text, telegramApi, alert.reply_markup);
       }
     } catch (e) {}
   }
 };
 
+// ================= MAIN TELEGRAM ROUTER =================
 async function handleTelegramUpdate(update, ctx) {
   const telegramApi = `https://api.telegram.org/bot${BOT_TOKEN}`;
   const msg = update.message;
@@ -685,42 +946,56 @@ async function handleTelegramUpdate(update, ctx) {
   text = text.replace(/@\w+bot/i, "").trim();
 
   if (cb?.id) {
-    await fetch(`${telegramApi}/answerCallbackQuery`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callback_query_id: cb.id }) }).catch(() => {});
+    await fetch(`${telegramApi}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cb.id })
+    }).catch(() => {});
   }
 
-  const userIsAdmin = isAdmin(userId);
-
-  if (userIsAdmin) {
+  if (isAdmin(userId)) {
     if (text === "/export_unused" || data === "admin_export") {
       const db = await getChannelDbState(telegramApi);
-      if (!db.fileId || db.index >= db.total) return send(chatId, "⚠️ Koi unused stock nahi hai.", telegramApi);
+      if (!db.fileId || db.index >= db.total) return send(chatId, "⚠️ <i>Koi unused stock baaki nahi hai.</i>", telegramApi);
+      const wait = await send(chatId, "⏳ <i>File download ho rahi hai...</i>", telegramApi);
       const lines = await loadChannelFileLines(db.fileId, telegramApi);
-      const unused = lines.slice(db.index);
-      const fd = new FormData();
-      fd.append("chat_id", chatId);
-      fd.append("document", new Blob([unused.join("\n")], { type: "text/plain" }), `stock_${unused.length}.txt`);
-      await fetch(`${telegramApi}/sendDocument`, { method: "POST", body: fd });
+      const unusedLines = lines.slice(db.index);
+
+      const formData = new FormData();
+      formData.append("chat_id", chatId);
+      formData.append("document", new Blob([unusedLines.join("\n")], { type: "text/plain" }), `fresh_stock_${unusedLines.length}.txt`);
+      formData.append("caption", `📄 <b>Exported Remaining Accounts:</b> <code>${unusedLines.length}</code>`);
+
+      await fetch(`${telegramApi}/sendDocument`, { method: "POST", body: formData });
+      if (wait) deleteMessage(chatId, (await wait.json())?.result?.message_id, telegramApi);
       return;
     }
+
     if (text === "/clear_stock" || data === "admin_clear") {
       const db = await getChannelDbState(telegramApi);
+      CACHED_FILE_ID = null;
+      CACHED_LINES = null;
       if (db.msgId) await updateChannelDb("EMPTY", 0, 0, db.msgId, telegramApi);
-      return messageId ? edit(chatId, messageId, "🧹 Stock reset ho gaya!", telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] }) : send(chatId, "🧹 Stock reset!", telegramApi);
+      return messageId
+        ? edit(chatId, messageId, "🧹 <b>Stock ledger successfully reset to 0!</b>", telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] })
+        : send(chatId, "🧹 <b>Stock ledger reset to 0!</b>", telegramApi);
     }
+
     if (text === "/stock" || data === "admin_status") {
       const db = await getChannelDbState(telegramApi);
-      const rep = `📊 <b>ADMIN STOCK STATUS</b>\n📦 Total: ${db.total} | Out: ${db.index} | Left: ${Math.max(0, db.total - db.index)}`;
-      const kb = { inline_keyboard: [[{ text: "📥 Export Unused", callback_data: "admin_export" }], [{ text: "🗑️ Clear Stock", callback_data: "admin_clear" }], [{ text: "🏠 Home", callback_data: "home" }]] };
+      const remaining = Math.max(0, db.total - db.index);
+      const rep = `📊 <b>OWNER LIVE STOCK STATUS</b>\n━━━━━━━━━━━━━━━━━━\n📦 <b>Total:</b> <code>${db.total}</code>\n📤 <b>Dispensed:</b> <code>${db.index}</code>\n✅ <b>Fresh:</b> <code>${remaining}</code>`;
+      const kb = { inline_keyboard: [[{ text: "📥 Export Unused", callback_data: "admin_export" }], [{ text: "🗑️ Reset Ledger", callback_data: "admin_clear" }], [{ text: "🏠 Home", callback_data: "home" }]] };
       return messageId ? edit(chatId, messageId, rep, telegramApi, kb) : send(chatId, rep, telegramApi, kb);
     }
   }
 
   if (msg?.document) {
-    if (!userIsAdmin) return send(chatId, "⚠️ Access Denied! Kewal authorized admins stock upload kar sakte hain.", telegramApi);
+    if (!isAdmin(userId)) return send(chatId, "⚠️ <i>Kewal Bot Owner stock upload kar sakte hain!</i>", telegramApi);
     const doc = msg.document;
-    if (!doc.file_name?.endsWith(".txt") && !doc.file_name?.endsWith(".csv")) return send(chatId, "⚠️ Sirf .txt ya .csv file upload karein!", telegramApi);
-    
-    const wait = await send(chatId, "⏳ Stock merge aur deduplicate ho raha hai...", telegramApi);
+    if (!doc.file_name?.endsWith(".txt") && !doc.file_name?.endsWith(".csv")) return send(chatId, "⚠️ <i>Sirf .txt ya .csv file upload karein!</i>", telegramApi);
+
+    const wait = await send(chatId, "⏳ <i>Stock merge aur deduplicate ho raha hai...</i>", telegramApi);
     const waitId = wait ? (await wait.json())?.result?.message_id : null;
 
     try {
@@ -747,45 +1022,52 @@ async function handleTelegramUpdate(update, ctx) {
         combinedLines = mergedSet;
       }
 
-      const fd = new FormData();
-      fd.append("chat_id", DB_CHANNEL_ID);
-      fd.append("document", new Blob([combinedLines.join("\n")], { type: "text/plain" }), `master_stock_${combinedLines.length}.txt`);
-      fd.append("caption", "Master Merged Stock Database");
-      
-      const uploadRes = await fetch(`${telegramApi}/sendDocument`, { method: "POST", body: fd }).then(r => r.json());
-      const newFileId = uploadRes?.result?.document?.file_id;
+      const formData = new FormData();
+      formData.append("chat_id", DB_CHANNEL_ID);
+      formData.append("document", new Blob([combinedLines.join("\n")], { type: "text/plain" }), `master_stock_${combinedLines.length}.txt`);
+      formData.append("caption", "Master Merged Stock Database");
 
-      if (!newFileId) throw new Error("Upload failed");
+      const uploadRes = await fetch(`${telegramApi}/sendDocument`, { method: "POST", body: formData }).then(r => r.json());
+      const finalFileId = uploadRes?.result?.document?.file_id;
 
-      const dbText = `🗄️ <b>MASTER STOCK DATABASE</b>\n📦 Total: ${combinedLines.length} | Out: 0 | Left: ${combinedLines.length}\n\n<code>DB_STORE: FILE:${newFileId} IDX:0 TOTAL:${combinedLines.length}</code>`;
+      if (!finalFileId) throw new Error("Upload failed");
+
+      CACHED_FILE_ID = null;
+      CACHED_LINES = null;
+
+      const dbText = `🗄️ <b>MASTER STOCK DATABASE</b>\n📦 Total: <code>${combinedLines.length}</code> | 📤 Dispensed: <code>0</code> | ✅ Fresh: <code>${combinedLines.length}</code>\n\n<code>DB_STORE: FILE:${finalFileId} IDX:0 TOTAL:${combinedLines.length}</code>`;
       const dbMsg = await send(DB_CHANNEL_ID, dbText, telegramApi);
       const dbMsgId = (await dbMsg.json())?.result?.message_id;
-      
+
       if (dbMsgId) {
-        await fetch(`${telegramApi}/pinChatMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: DB_CHANNEL_ID, message_id: dbMsgId }) }).catch(() => {});
+        await fetch(`${telegramApi}/pinChatMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: DB_CHANNEL_ID, message_id: dbMsgId, disable_notification: true })
+        }).catch(() => {});
       }
 
       if (currentDb.msgId) {
         await deleteMessage(DB_CHANNEL_ID, currentDb.msgId, telegramApi);
       }
 
-      return edit(chatId, waitId, `✅ Stock Successfully Merged & Cleaned!\n📥 Added: ${newLines.length} accounts\n📦 Total Active Stock: <b>${combinedLines.length}</b>`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
+      return edit(chatId, waitId, `✅ <b>Stock Successfully Merged & Cleaned!</b>\n📥 Added: <code>${newLines.length}</code> accounts\n📦 Total Active Stock: <b>${combinedLines.length}</b>`, telegramApi, { inline_keyboard: [[{ text: "📊 Status", callback_data: "admin_status" }], [{ text: "🏠 Home", callback_data: "home" }]] });
     } catch (e) {
-      return edit(chatId, waitId, "❌ Stock merge error. Kripya dobara koshish karein.", telegramApi);
+      return edit(chatId, waitId, "❌ <i>Stock merge karne me error aaya.</i>", telegramApi);
     }
   }
 
   if (text === "/start" || data === "home") {
     const db = await getChannelDbState(telegramApi);
-    const left = Math.max(0, db.total - db.index);
+    const remaining = Math.max(0, db.total - db.index);
 
     const welcomeMsg =
-      `🤖 <b>VIBEPULSE ENTERPRISE SUITE</b>\n` +
+      `🤖 <b>ALL-IN-ONE ENTERPRISE MAIL & LIVE INBOX BOT</b>\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
-      `📦 Outlook Stock: <code>${left}</code>\n` +
-      `🌐 Domain: <code>@${escapeHtml(DEFAULT_DOMAIN)}</code>\n` +
-      `⚡ Systems: <code>Full Engine Active</code>\n\n` +
-      `👇 <i>Apni zaroorat ke hisab se niche option select karein:</i>`;
+      `📦 <b>Hotmail/Outlook Stock:</b> <code>${remaining}</code>\n` +
+      `🌐 <b>Custom Temp Domain:</b> <code>@${escapeHtml(DEFAULT_DOMAIN)}</code>\n` +
+      `🔑 <b>OTP Support:</b> <code>4, 6 & 8 Digits (Meta, IG, Google, etc.)</code>\n\n` +
+      `💡 <i>Kisi bhi purane ya naye Email ka OTP lene ke liye seedha chat me Email bhejein!</i>`;
 
     const rows = [
       [{ text: "🔥 Get Fresh Hotmail/Outlook", callback_data: "get_stock" }],
@@ -793,13 +1075,13 @@ async function handleTelegramUpdate(update, ctx) {
       [{ text: "⚡ Generate IG Usernames", callback_data: "gen_usernames" }],
       [{ text: "🔐 2FA Code Generator", callback_data: "menu_2fa" }]
     ];
-    if (userIsAdmin) rows.push([{ text: "📊 Admin Control Panel", callback_data: "admin_status" }]);
+    if (isAdmin(userId)) rows.push([{ text: "📊 Owner Stock Panel", callback_data: "admin_status" }]);
 
     return messageId ? edit(chatId, messageId, welcomeMsg, telegramApi, { inline_keyboard: rows }) : send(chatId, welcomeMsg, telegramApi, { inline_keyboard: rows });
   }
 
   if (data === "menu_2fa" || text === "/2fa") {
-    const tMsg = `🔐 <b>2FA TOTP CODE GENERATOR</b>\n━━━━━━━━━━━━━━━━━━\nAapka Instagram ya kisi bhi service ka 2FA Secret Key (jaise <code>JBSWY3DPEHPK3PXP</code>) yahan bhejें ya niche button dabayein. Bot turant live 6-digit code de dega!`;
+    const tMsg = `🔐 <b>2FA TOTP CODE GENERATOR</b>\n━━━━━━━━━━━━━━━━━━\nAapka Instagram ya kisi bhi service ka 2FA Secret Key (jaise <code>JBSWY3DPEHPK3PXP</code>) yahan bhejein. Bot turant live 6-digit code de dega!`;
     const kb = {
       inline_keyboard: [
         [{ text: "🏠 Home", callback_data: "home" }]
@@ -846,56 +1128,48 @@ async function handleTelegramUpdate(update, ctx) {
   if (data === "get_stock" || text === "/get") {
     const db = await getChannelDbState(telegramApi);
     if (!db.fileId || db.index >= db.total) {
-      const em = "⚠️ <b>Out of Stock!</b>\n<i>Abhi koi fresh account uplabdh nahi hai. Nayi file upload karein.</i>";
-      return messageId ? edit(chatId, messageId, em, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] }) : send(chatId, em, telegramApi);
+      const emptyMsg = "⚠️ <b>Out of Stock!</b>\n<i>Abhi koi fresh account uplabdh nahi hai.</i>";
+      return messageId ? edit(chatId, messageId, emptyMsg, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] }) : send(chatId, emptyMsg, telegramApi);
     }
+
     const lines = await loadChannelFileLines(db.fileId, telegramApi);
-    const acc = lines[db.index];
-    
+    const accountLine = lines[db.index];
+    if (!accountLine) return send(chatId, "⚠️ <i>Stock read karne me error aaya.</i>", telegramApi);
+
     await updateChannelDb(db.fileId, db.index + 1, lines.length, db.msgId, telegramApi);
 
-    const parts = acc.split(/[|:]/);
+    const parts = accountLine.split(/[|:]/);
     const email = parts[0]?.trim() || "";
-    const pass = parts[1]?.trim() || "";
-    const inboxUrl = getLiveInboxUrl(email);
+    const pass = parts[1]?.trim() || "N/A";
+    const liveInboxUrl = getLiveInboxUrl(email);
 
-    const msgText = `✅ <b>OUTLOOK ACCOUNT DISPENSED</b>\n📧 <code>${escapeHtml(email)}</code>\n🔑 <code>${escapeHtml(pass)}</code>`;
+    const msgText = `✅ <b>FRESH ACCOUNT DISPENSED</b>\n━━━━━━━━━━━━━━━━━━\n📧 <b>Email:</b> <code>${escapeHtml(email)}</code>\n🔑 <b>Password:</b> <code>${escapeHtml(pass)}</code>\n⏳ <b>Status:</b> <i>Listening for OTP (4, 6, 8 digits)...</i>`;
+
     const kb = {
       inline_keyboard: [
         [{ text: "📋 Copy Email", copy_text: { text: email } }, { text: "🔑 Copy Pass", copy_text: { text: pass } }],
-        [
-          { text: "🔄 Get OTP / Refresh", callback_data: `chk_mail:${email}` },
-          { text: "🌐 Live Inbox", url: inboxUrl }
-        ],
-        [
-          { text: "🔥 Next", callback_data: "get_stock" },
-          { text: "🏠 Home", callback_data: "home" }
-        ]
+        [{ text: "🔄 Check OTP Now", callback_data: `chk_mail:${email}` }, { text: "🌐 Live Inbox Page", url: liveInboxUrl }],
+        [{ text: "🔥 Next Account", callback_data: "get_stock" }, { text: "🏠 Home", callback_data: "home" }]
       ]
     };
 
     await (messageId ? edit(chatId, messageId, msgText, telegramApi, kb) : send(chatId, msgText, telegramApi, kb));
-    ctx.waitUntil(startOAuthAutoPush(chatId, acc, telegramApi));
+    ctx.waitUntil(startOAuthAutoPush(chatId, accountLine, telegramApi));
     return;
   }
 
   if (data === "gen_temp" || text === "/temp") {
     const email = `${getRandomUser()}@${DEFAULT_DOMAIN}`;
     await saveTempMailState(email, chatId, null, telegramApi);
-    const inboxUrl = getLiveInboxUrl(email);
+    const liveInboxUrl = getLiveInboxUrl(email);
 
-    const tempMsg = `⚡ <b>TEMP MAIL CREATED</b>\n📧 <code>${escapeHtml(email)}</code>\n⏳ <i>Listening for OTP...</i>`;
+    const tempMsg = `⚡ <b>CUSTOM TEMP MAIL GENERATED</b>\n━━━━━━━━━━━━━━━━━━\n📧 <b>Email:</b> <code>${escapeHtml(email)}</code>\n⏳ <b>Status:</b> <i>Auto-listening for incoming OTP...</i>`;
+
     const kb = {
       inline_keyboard: [
-        [{ text: "📋 Copy Email", copy_text: { text: email } }],
-        [
-          { text: "🔄 Check OTP / Refresh", callback_data: `chk_mail:${email}` },
-          { text: "🌐 Live Inbox", url: inboxUrl }
-        ],
-        [
-          { text: "⚡ Naya", callback_data: "gen_temp" },
-          { text: "🏠 Home", callback_data: "home" }
-        ]
+        [{ text: "📋 Copy Temp Mail", copy_text: { text: email } }],
+        [{ text: "🔄 Check OTP Now", callback_data: `chk_temp:${email}` }, { text: "🌐 Live Inbox Page", url: liveInboxUrl }],
+        [{ text: "⚡ Naya Temp Mail", callback_data: "gen_temp" }, { text: "🏠 Home", callback_data: "home" }]
       ]
     };
 
@@ -906,46 +1180,66 @@ async function handleTelegramUpdate(update, ctx) {
 
   if (data?.startsWith("chk_temp:")) {
     const email = data.replace("chk_temp:", "").trim().toLowerCase();
+    await saveTempMailState(email, chatId, null, telegramApi);
     const list = await getTempMailMessages(email, telegramApi);
+    const liveInboxUrl = getLiveInboxUrl(email);
+
     if (list.length > 0) {
-      const alert = buildShortMailAlert(email, list[0]);
+      const latest = list[0];
+      const alert = buildRichMailAlert(email, latest, true);
       return messageId ? edit(chatId, messageId, alert.text, telegramApi, alert.reply_markup) : send(chatId, alert.text, telegramApi, alert.reply_markup);
+    } else {
+      ctx.waitUntil(startTempMailAutoPush(chatId, email, telegramApi, null));
+      return send(chatId, `⏳ <code>${escapeHtml(email)}</code> par abhi koi mail nahi aaya hai.`, telegramApi, {
+        inline_keyboard: [[{ text: "🌐 Open Live Inbox Page", url: liveInboxUrl }], [{ text: "🔄 Check Again", callback_data: `chk_temp:${email}` }, { text: "🏠 Home", callback_data: "home" }]]
+      });
     }
-    return send(chatId, `⏳ <code>${escapeHtml(email)}</code> par abhi koi mail nahi aaya hai.`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
   }
 
   if (data?.startsWith("chk_mail:") || text.includes("@")) {
     const rawQuery = data?.startsWith("chk_mail:") ? data.replace("chk_mail:", "").trim() : text.trim();
     const queryEmail = rawQuery.split(/[|:]/)[0].trim().toLowerCase();
     const domain = queryEmail.split("@")[1] || "";
-    const inboxUrl = getLiveInboxUrl(queryEmail);
+    const liveInboxUrl = getLiveInboxUrl(queryEmail);
 
     if (domain === DEFAULT_DOMAIN) {
       await saveTempMailState(queryEmail, chatId, null, telegramApi);
       const list = await getTempMailMessages(queryEmail, telegramApi);
-      ctx.waitUntil(startTempMailAutoPush(chatId, queryEmail, telegramApi, list[0]?.id || null));
+      const currentTopId = list[0]?.id || null;
+
+      ctx.waitUntil(startTempMailAutoPush(chatId, queryEmail, telegramApi, currentTopId));
+
       if (list.length > 0) {
-        const alert = buildShortMailAlert(queryEmail, list[0]);
-        return send(chatId, `♻️ <b>RE-ACTIVATED</b>\n\n` + alert.text, telegramApi, alert.reply_markup);
+        const latest = list[0];
+        const alert = buildRichMailAlert(queryEmail, latest, true);
+        return send(chatId, `♻️ <b>TEMP MAIL RE-ACTIVATED</b>\n\n` + alert.text, telegramApi, alert.reply_markup);
       }
-      return send(chatId, `♻️ Active: <code>${escapeHtml(queryEmail)}</code>\n⏳ OTP aate hi push ho jayega.`, telegramApi, { inline_keyboard: [[{ text: "🌐 Live Inbox", url: inboxUrl }], [{ text: "🏠 Home", callback_data: "home" }]] });
+
+      return send(chatId, `♻️ <b>Temp Mail Active:</b> <code>${escapeHtml(queryEmail)}</code>\n⏳ <i>Purana email re-activate ho gaya hai, OTP bhejte hi yahan aa jayega!</i>`, telegramApi, {
+        inline_keyboard: [[{ text: "🔄 Check OTP", callback_data: `chk_temp:${queryEmail}` }], [{ text: "🌐 Live Inbox Page", url: liveInboxUrl }], [{ text: "🏠 Home", callback_data: "home" }]]
+      });
     }
 
-    let targetLine = rawQuery;
+    let targetAccountLine = rawQuery;
     if (!rawQuery.includes("|") && !rawQuery.includes(":")) {
-      targetLine = await findAccountLineByEmail(queryEmail, telegramApi);
+      targetAccountLine = await findAccountLineByEmail(queryEmail, telegramApi);
     }
 
-    const wait = await send(chatId, `🔍 Purane messages scan kiye ja rahe hain...`, telegramApi);
-    const waitId = wait ? (await wait.json())?.result?.message_id : null;
-    const res = await getOAuth2MailboxOtp(targetLine);
+    const waitMsg = await send(chatId, `🔍 <code>${escapeHtml(queryEmail)}</code> <i>ka inbox check kiya ja raha hai...</i>`, telegramApi);
+    const waitId = waitMsg ? (await waitMsg.json())?.result?.message_id : null;
+
+    const res = await getOAuth2MailboxOtp(targetAccountLine);
 
     if (res.otp || (res.allMessages && res.allMessages.length > 0)) {
-      const alert = buildShortMailAlert(queryEmail, res.allMessages[0] || res);
+      const latestMsg = res.allMessages[0] || { otp: res.otp, subject: res.subject, snippet: res.snippet, link: res.link, service: res.service };
+      const alert = buildRichMailAlert(queryEmail, latestMsg, false);
       return edit(chatId, waitId, alert.text, telegramApi, alert.reply_markup);
     } else {
-      ctx.waitUntil(startOAuthAutoPush(chatId, targetLine, telegramApi));
-      return edit(chatId, waitId, `📭 Is inbox me koi naya OTP nahi mila.\n📧 <code>${escapeHtml(queryEmail)}</code>`, telegramApi, { inline_keyboard: [[{ text: "🌐 Live Inbox", url: inboxUrl }], [{ text: "🏠 Home", callback_data: "home" }]] });
+      ctx.waitUntil(startOAuthAutoPush(chatId, targetAccountLine, telegramApi));
+      const noOtpMsg = `📭 <b>Abhi Koi OTP Nahi Mila</b>\n📧 <code>${escapeHtml(queryEmail)}</code>\n⏳ <i>Background listener chalu hai!</i>`;
+      return edit(chatId, waitId, noOtpMsg, telegramApi, {
+        inline_keyboard: [[{ text: "🔄 Check Again", callback_data: `chk_mail:${queryEmail}` }], [{ text: "🌐 Live Inbox Page", url: liveInboxUrl }], [{ text: "🏠 Home", callback_data: "home" }]]
+      });
     }
   }
 }

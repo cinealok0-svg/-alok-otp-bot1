@@ -1,13 +1,12 @@
 /**
- * All-In-One Enterprise Bot (Ultimate Professional Edition + 2FA TOTP Generator)
+ * All-In-One Enterprise Bot (Ultimate Stock Ledger & Smart Auto-Deduplication Edition)
  * Features:
+ *  - Smart Multi-File Stock Merging & Auto-Deduplication (No duplicate accounts)
+ *  - Auto-Removal of Used Accounts (Used stock is permanently purged from active ledger)
  *  - 🔐 Built-In 2FA TOTP Code Generator (Google Authenticator Style)
  *  - Hotmail/Outlook Old Messages & OTP Scan + Live Webmail Portal
  *  - Secure Multi-Admin Access Control (ADMINS_LIST whitelist)
- *  - Professional Clean Dashboard UI & Compact OTP Messages
- *  - Universal 4, 6, 8-Digit OTP Parser (Meta, Instagram, Google, etc.)
- *  - Custom Domain Temp Mail (@vibepulsemedia.online)
- *  - Real Aesthetic IG Username Generator (`ishita_482` style)
+ *  - Universal 4, 6, 8-Digit OTP Parser & Real Aesthetic IG Username Generator
  */
 
 // ================= DYNAMIC ENV BINDINGS =================
@@ -128,7 +127,7 @@ async function generateTotpCode(secret) {
 
     const buffer = new ArrayBuffer(8);
     const view = new DataView(buffer);
-    view.setUint32(4, counter, false); // Big endian
+    view.setUint32(4, counter, false);
 
     const cryptoKey = await crypto.subtle.importKey(
       "raw",
@@ -187,7 +186,6 @@ function htmlToCleanText(rawHtml) {
     .trim();
 }
 
-// Universal 4, 6, 8 Digit OTP Parser
 function extractSmartOtpAndLink(rawText, subjectText = "", fallbackEmail = "") {
   const combinedRaw = `${subjectText || ""}\n${rawText || ""}`;
   const cleanBody = htmlToCleanText(rawText || "");
@@ -270,6 +268,7 @@ function parseRawMimeEmail(rawEmail) {
   return { subject, from, bodyText: htmlToCleanText(fullDecoded), bodyHtml: fullDecoded };
 }
 
+// Smart Strict Stock Parser with Automatic Deduplication
 function parseStrictStockLines(rawContent) {
   if (!rawContent) return [];
   const lines = rawContent.split(/\r?\n/);
@@ -542,7 +541,7 @@ async function startTempMailAutoPush(chatId, email, telegramApi, baselineTopId =
   }
 }
 
-// ================= DATABASE HELPERS =================
+// ================= SMART DATABASE HELPERS (AUTO-MERGE & DEDUPLICATION) =================
 async function getChannelDbState(telegramApi) {
   try {
     const res = await fetch(`${telegramApi}/getChat?chat_id=${DB_CHANNEL_ID}`).then(r => r.json());
@@ -561,11 +560,15 @@ async function getChannelDbState(telegramApi) {
 
 async function loadChannelFileLines(fileId, telegramApi) {
   if (CACHED_FILE_ID === fileId && CACHED_LINES) return CACHED_LINES;
-  const fileInfo = await fetch(`${telegramApi}/getFile?file_id=${fileId}`).then(r => r.json());
-  const content = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
-  CACHED_FILE_ID = fileId;
-  CACHED_LINES = parseStrictStockLines(content);
-  return CACHED_LINES;
+  try {
+    const fileInfo = await fetch(`${telegramApi}/getFile?file_id=${fileId}`).then(r => r.json());
+    const content = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
+    CACHED_FILE_ID = fileId;
+    CACHED_LINES = parseStrictStockLines(content);
+    return CACHED_LINES;
+  } catch (e) {
+    return [];
+  }
 }
 
 async function findAccountLineByEmail(queryEmail, telegramApi) {
@@ -581,7 +584,7 @@ async function findAccountLineByEmail(queryEmail, telegramApi) {
 
 async function updateChannelDb(fileId, newIndex, total, msgId, telegramApi) {
   const remaining = Math.max(0, total - newIndex);
-  const dbText = `🗄️ <b>STOCK LEDGER</b>\n📦 Total: <code>${total}</code> | Out: <code>${newIndex}</code> | Left: <code>${remaining}</code>\n\n<code>DB_STORE: FILE:${fileId} IDX:${newIndex} TOTAL:${total}</code>`;
+  const dbText = `🗄️ <b>STOCK LEDGER (SMART AUTO-CLEAN)</b>\n📦 Total: <code>${total}</code> | Out: <code>${newIndex}</code> | Left: <code>${remaining}</code>\n\n<code>DB_STORE: FILE:${fileId} IDX:${newIndex} TOTAL:${total}</code>`;
   if (msgId) {
     await fetch(`${telegramApi}/editMessageText`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -723,25 +726,72 @@ async function handleTelegramUpdate(update, ctx) {
     }
   }
 
+  // Smart Multi-File Upload & Auto-Merge / Deduplication Handler
   if (msg?.document) {
     if (!userIsAdmin) return send(chatId, "⚠️ Access Denied! Kewal authorized admins stock upload kar sakte hain.", telegramApi);
     const doc = msg.document;
-    if (!doc.file_name?.endsWith(".txt")) return send(chatId, "⚠️ Sirf .txt file upload karein!", telegramApi);
-    const wait = await send(chatId, "⏳ File process ho rahi hai...", telegramApi);
+    if (!doc.file_name?.endsWith(".txt") && !doc.file_name?.endsWith(".csv")) return send(chatId, "⚠️ Sirf .txt ya .csv file upload karein!", telegramApi);
+    
+    const wait = await send(chatId, "⏳ Stock merge aur deduplicate ho raha hai...", telegramApi);
     const waitId = wait ? (await wait.json())?.result?.message_id : null;
 
     try {
-      const fRes = await fetch(`${telegramApi}/sendDocument`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: DB_CHANNEL_ID, document: doc.file_id, caption: "Stock File" }) }).then(r => r.json());
-      const fId = fRes?.result?.document?.file_id || doc.file_id;
+      // Download new uploaded file content
+      const fileInfo = await fetch(`${telegramApi}/getFile?file_id=${doc.file_id}`).then(r => r.json());
+      const newFileContent = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
+      const newLines = parseStrictStockLines(newFileContent);
+
+      // Check if existing stock exists in DB channel
+      const currentDb = await getChannelDbState(telegramApi);
+      let combinedLines = [...newLines];
+
+      if (currentDb.fileId && currentDb.fileId !== "EMPTY") {
+        const oldLines = await loadChannelFileLines(currentDb.fileId, telegramApi);
+        // Keep remaining unused old lines and merge with new ones without duplicates
+        const unusedOldLines = oldLines.slice(currentDb.index);
+        const seenEmails = new Set();
+        const mergedSet = [];
+        
+        for (const l of [...unusedOldLines, ...newLines]) {
+          const emailPart = l.split(/[|:]/)[0].trim().toLowerCase();
+          if (!seenEmails.has(emailPart)) {
+            seenEmails.add(emailPart);
+            mergedSet.push(l);
+          }
+        }
+        combinedLines = mergedSet;
+      }
+
+      // Upload merged clean stock file back to DB channel as a single master file
+      const fd = new FormData();
+      fd.append("chat_id", DB_CHANNEL_ID);
+      fd.append("document", new Blob([combinedLines.join("\n")], { type: "text/plain" }), `master_stock_${combinedLines.length}.txt`);
+      fd.append("caption", "Master Merged Stock Database");
+      
+      const uploadRes = await fetch(`${telegramApi}/sendDocument`, { method: "POST", body: fd }).then(r => r.json());
+      const newFileId = uploadRes?.result?.document?.file_id;
+
+      if (!newFileId) throw new Error("Upload failed");
+
       CACHED_FILE_ID = null; CACHED_LINES = null;
-      const lines = await loadChannelFileLines(fId, telegramApi);
-      const dbText = `🗄️ <b>MASTER STOCK DATABASE</b>\n📦 Total: ${lines.length} | Out: 0 | Left: ${lines.length}\n\n<code>DB_STORE: FILE:${fId} IDX:0 TOTAL:${lines.length}</code>`;
+      
+      // Reset index to 0 for the fresh combined master file
+      const dbText = `🗄️ <b>MASTER STOCK DATABASE</b>\n📦 Total: ${combinedLines.length} | Out: 0 | Left: ${combinedLines.length}\n\n<code>DB_STORE: FILE:${newFileId} IDX:0 TOTAL:${combinedLines.length}</code>`;
       const dbMsg = await send(DB_CHANNEL_ID, dbText, telegramApi);
       const dbMsgId = (await dbMsg.json())?.result?.message_id;
-      if (dbMsgId) await fetch(`${telegramApi}/pinChatMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: DB_CHANNEL_ID, message_id: dbMsgId }) }).catch(() => {});
-      return edit(chatId, waitId, `✅ Stock uploaded successfully! (${lines.length} accounts)`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
+      
+      if (dbMsgId) {
+        await fetch(`${telegramApi}/pinChatMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: DB_CHANNEL_ID, message_id: dbMsgId }) }).catch(() => {});
+      }
+
+      // Cleanup old pinned db message if exists
+      if (currentDb.msgId) {
+        await deleteMessage(DB_CHANNEL_ID, currentDb.msgId, telegramApi);
+      }
+
+      return edit(chatId, waitId, `✅ Stock Successfully Merged & Cleaned!\n📥 Added: ${newLines.length} accounts\n📦 Total Active Stock: <b>${combinedLines.length}</b>`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
     } catch (e) {
-      return edit(chatId, waitId, "❌ Upload error.", telegramApi);
+      return edit(chatId, waitId, "❌ Stock merge error. Kripya dobara koshish karein.", telegramApi);
     }
   }
 
@@ -755,7 +805,7 @@ async function handleTelegramUpdate(update, ctx) {
       `━━━━━━━━━━━━━━━━━━\n` +
       `📦 Outlook Stock: <code>${left}</code>\n` +
       `🌐 Domain: <code>@${escapeHtml(DEFAULT_DOMAIN)}</code>\n` +
-      `⚡ Systems: <code>OTP Parser & 2FA Active</code>\n\n` +
+      `⚡ Systems: <code>Smart Deduplication Active</code>\n\n` +
       `👇 <i>Apni zaroorat ke hisab se niche option select karein:</i>`;
 
     const rows = [
@@ -817,15 +867,17 @@ async function handleTelegramUpdate(update, ctx) {
       : send(chatId, textOut, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // Dispense Outlook Stock
+  // Dispense Outlook Stock (With Automatic Index Increment & Used Account Purging)
   if (data === "get_stock" || text === "/get") {
     const db = await getChannelDbState(telegramApi);
     if (!db.fileId || db.index >= db.total) {
-      const em = "⚠️ <b>Out of Stock!</b>\n<i>Abhi koi fresh account uplabdh nahi hai.</i>";
+      const em = "⚠️ <b>Out of Stock!</b>\n<i>Abhi koi fresh account uplabdh nahi hai. Nayi file upload karein.</i>";
       return messageId ? edit(chatId, messageId, em, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] }) : send(chatId, em, telegramApi);
     }
     const lines = await loadChannelFileLines(db.fileId, telegramApi);
     const acc = lines[db.index];
+    
+    // Automatically increment index so this used account is never given out again
     await updateChannelDb(db.fileId, db.index + 1, lines.length, db.msgId, telegramApi);
 
     const parts = acc.split(/[|:]/);

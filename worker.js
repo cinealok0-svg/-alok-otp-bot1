@@ -1,5 +1,5 @@
 /**
- * All-In-One Enterprise Bot (Complete 1000+ Lines Master Edition)
+ * All-In-One Enterprise Bot (Pro Edition - Universal 4, 6, 8 Digit OTP + Old Email Re-Activation)
  * Configured for Cloudflare Workers & Email Routing
  */
 
@@ -43,10 +43,6 @@ function initEnv(env, requestUrl = "") {
   }
 }
 
-function isAdmin(userId) {
-  return String(userId).trim() === String(OWNER_ID).trim();
-}
-
 function escapeHtml(str) {
   if (!str) return "";
   return String(str)
@@ -62,91 +58,11 @@ function getRandomUser() {
   return `${f}.${l}${Math.floor(10 + Math.random() * 90)}`.toLowerCase();
 }
 
-function generateInstagramUsernames() {
-  const list = [];
-  const shuffled = [...FEMALE_FIRST_NAMES].sort(() => 0.5 - Math.random());
-  
-  const patterns = [
-    (name) => `${name}_${Math.floor(100 + Math.random() * 900)}`,
-    (name) => `${name}.${Math.floor(10 + Math.random() * 90)}`,
-    (name) => `${name}._${Math.floor(1000 + Math.random() * 9000)}`,
-    (name) => `itz_${name}${Math.floor(1 + Math.random() * 9)}`,
-    (name) => `${name}__official_${Math.floor(10 + Math.random() * 90)}`
-  ];
-
-  for (let i = 0; i < 5; i++) {
-    const name = shuffled[i % shuffled.length];
-    const patternFunc = patterns[Math.floor(Math.random() * patterns.length)];
-    list.push(patternFunc(name));
-  }
-  return list;
-}
-
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function getLiveInboxUrl(email) {
   const base = WORKER_ORIGIN || `https://${DEFAULT_DOMAIN}`;
   return `${base}/inbox?email=${encodeURIComponent(email.toLowerCase().trim())}`;
-}
-
-// ================= 🔐 2FA TOTP GENERATOR ALGORITHM =================
-function base32ToUint8Array(base32) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let cleaned = base32.toUpperCase().replace(/=+$/, "").replace(/\s+/g, "");
-  let bits = 0;
-  let value = 0;
-  let output = [];
-
-  for (let i = 0; i < cleaned.length; i++) {
-    let idx = alphabet.indexOf(cleaned[i]);
-    if (idx === -1) continue;
-    value = (value << 5) | idx;
-    bits += 5;
-    if (bits >= 8) {
-      bits -= 8;
-      output.push((value >> bits) & 0xFF);
-    }
-  }
-  return new Uint8Array(output);
-}
-
-async function generateTotpCode(secret) {
-  try {
-    const cleanSecret = secret.replace(/\s+/g, "").replace(/=/g, "");
-    const keyBytes = base32ToUint8Array(cleanSecret);
-    if (keyBytes.length === 0) return null;
-
-    const epoch = Math.floor(Date.now() / 1000);
-    const timeStep = 30;
-    const counter = Math.floor(epoch / timeStep);
-
-    const buffer = new ArrayBuffer(8);
-    const view = new DataView(buffer);
-    view.setUint32(4, counter, false);
-
-    const cryptoKey = await crypto.subtle.importKey(
-      "raw",
-      keyBytes,
-      { name: "HMAC", hash: { name: "SHA-1" } },
-      false,
-      ["sign"]
-    );
-
-    const signature = await crypto.subtle.sign("HMAC", cryptoKey, buffer);
-    const hmacResult = new Uint8Array(signature);
-
-    const offset = hmacResult[hmacResult.length - 1] & 0x0F;
-    const binary =
-      ((hmacResult[offset] & 0x7F) << 24) |
-      ((hmacResult[offset + 1] & 0xFF) << 16) |
-      ((hmacResult[offset + 2] & 0xFF) << 8) |
-      (hmacResult[offset + 3] & 0xFF);
-
-    const otp = binary % 1000000;
-    return String(otp).padStart(6, "0");
-  } catch (e) {
-    return null;
-  }
 }
 
 // Service Detector
@@ -429,6 +345,7 @@ async function getOAuth2MailboxMessages(accountLine) {
       } catch (e) {}
     }
 
+    // DongvanFB Graph API Reader
     try {
       const dvPostRes = await fetch("https://tools.dongvanfb.net/api/graph_messages", {
         method: "POST",
@@ -463,6 +380,7 @@ async function getOAuth2MailboxMessages(accountLine) {
     } catch (e) {}
   }
 
+  // DongvanFB Key Endpoints
   const urls = [
     `https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(rawLine)}`,
     `https://api.dongvanfb.com/api/get_code?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(email)}`,
@@ -580,7 +498,7 @@ async function getTempMailMessages(email, telegramApi) {
             otp: otp,
             link: getLiveInboxUrl(cleanEmail),
             service: detectService(sName),
-            time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }),
+            time: new Date().toLocaleTimeString(),
             pushed: true
           };
           localList.unshift(syncedMsg);
@@ -953,7 +871,7 @@ async function handleTelegramUpdate(update, ctx) {
     }).catch(() => {});
   }
 
-  if (isAdmin(userId)) {
+  if (userId === OWNER_ID) {
     if (text === "/export_unused" || data === "admin_export") {
       const db = await getChannelDbState(telegramApi);
       if (!db.fileId || db.index >= db.total) return send(chatId, "⚠️ <i>Koi unused stock baaki nahi hai.</i>", telegramApi);
@@ -991,51 +909,28 @@ async function handleTelegramUpdate(update, ctx) {
   }
 
   if (msg?.document) {
-    if (!isAdmin(userId)) return send(chatId, "⚠️ <i>Kewal Bot Owner stock upload kar sakte hain!</i>", telegramApi);
+    if (userId !== OWNER_ID) return send(chatId, "⚠️ <i>Kewal Bot Owner stock upload kar sakte hain!</i>", telegramApi);
     const doc = msg.document;
-    if (!doc.file_name?.endsWith(".txt") && !doc.file_name?.endsWith(".csv")) return send(chatId, "⚠️ <i>Sirf .txt ya .csv file upload karein!</i>", telegramApi);
+    if (!doc.file_name?.endsWith(".txt")) return send(chatId, "⚠️ <i>Sirf .txt file upload karein!</i>", telegramApi);
 
-    const wait = await send(chatId, "⏳ <i>Stock merge aur deduplicate ho raha hai...</i>", telegramApi);
+    const wait = await send(chatId, "⏳ <i>File read ki ja rahi hai...</i>", telegramApi);
     const waitId = wait ? (await wait.json())?.result?.message_id : null;
 
     try {
-      const fileInfo = await fetch(`${telegramApi}/getFile?file_id=${doc.file_id}`).then(r => r.json());
-      const newFileContent = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.result.file_path}`).then(r => r.text());
-      const newLines = parseStrictStockLines(newFileContent);
+      const forwardRes = await fetch(`${telegramApi}/sendDocument`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: DB_CHANNEL_ID, document: doc.file_id, caption: `📁 Stock File Uploaded` })
+      }).then(r => r.json());
 
-      const currentDb = await getChannelDbState(telegramApi);
-      let combinedLines = [...newLines];
-
-      if (currentDb.fileId && currentDb.fileId !== "EMPTY") {
-        const oldLines = await loadChannelFileLines(currentDb.fileId, telegramApi);
-        const unusedOldLines = oldLines.slice(currentDb.index);
-        const seenEmails = new Set();
-        const mergedSet = [];
-        
-        for (const l of [...unusedOldLines, ...newLines]) {
-          const emailPart = l.split(/[|:]/)[0].trim().toLowerCase();
-          if (!seenEmails.has(emailPart)) {
-            seenEmails.add(emailPart);
-            mergedSet.push(l);
-          }
-        }
-        combinedLines = mergedSet;
-      }
-
-      const formData = new FormData();
-      formData.append("chat_id", DB_CHANNEL_ID);
-      formData.append("document", new Blob([combinedLines.join("\n")], { type: "text/plain" }), `master_stock_${combinedLines.length}.txt`);
-      formData.append("caption", "Master Merged Stock Database");
-
-      const uploadRes = await fetch(`${telegramApi}/sendDocument`, { method: "POST", body: formData }).then(r => r.json());
-      const finalFileId = uploadRes?.result?.document?.file_id;
-
-      if (!finalFileId) throw new Error("Upload failed");
-
+      const finalFileId = forwardRes?.result?.document?.file_id || doc.file_id;
       CACHED_FILE_ID = null;
       CACHED_LINES = null;
+      const lines = await loadChannelFileLines(finalFileId, telegramApi);
 
-      const dbText = `🗄️ <b>MASTER STOCK DATABASE</b>\n📦 Total: <code>${combinedLines.length}</code> | 📤 Dispensed: <code>0</code> | ✅ Fresh: <code>${combinedLines.length}</code>\n\n<code>DB_STORE: FILE:${finalFileId} IDX:0 TOTAL:${combinedLines.length}</code>`;
+      if (lines.length === 0) return edit(chatId, waitId, "❌ <i>File ke andar koi valid email line nahi mili.</i>", telegramApi);
+
+      const dbText = `🗄️ <b>MASTER STOCK DATABASE</b>\n━━━━━━━━━━━━━━━━━━\n📦 Total: <code>${lines.length}</code> | 📤 Dispensed: <code>0</code> | ✅ Fresh: <code>${lines.length}</code>\n\n<code>DB_STORE: FILE:${finalFileId} IDX:0 TOTAL:${lines.length}</code>`;
       const dbMsg = await send(DB_CHANNEL_ID, dbText, telegramApi);
       const dbMsgId = (await dbMsg.json())?.result?.message_id;
 
@@ -1047,13 +942,9 @@ async function handleTelegramUpdate(update, ctx) {
         }).catch(() => {});
       }
 
-      if (currentDb.msgId) {
-        await deleteMessage(DB_CHANNEL_ID, currentDb.msgId, telegramApi);
-      }
-
-      return edit(chatId, waitId, `✅ <b>Stock Successfully Merged & Cleaned!</b>\n📥 Added: <code>${newLines.length}</code> accounts\n📦 Total Active Stock: <b>${combinedLines.length}</b>`, telegramApi, { inline_keyboard: [[{ text: "📊 Status", callback_data: "admin_status" }], [{ text: "🏠 Home", callback_data: "home" }]] });
+      return edit(chatId, waitId, `✅ <b>Stock Successfully Uploaded & Pinned!</b>\n📦 <b>Valid Accounts:</b> <code>${lines.length}</code>`, telegramApi, { inline_keyboard: [[{ text: "📊 Status", callback_data: "admin_status" }], [{ text: "🏠 Home", callback_data: "home" }]] });
     } catch (e) {
-      return edit(chatId, waitId, "❌ <i>Stock merge karne me error aaya.</i>", telegramApi);
+      return edit(chatId, waitId, "❌ <i>Stock upload karne me error aaya.</i>", telegramApi);
     }
   }
 
@@ -1071,58 +962,11 @@ async function handleTelegramUpdate(update, ctx) {
 
     const rows = [
       [{ text: "🔥 Get Fresh Hotmail/Outlook", callback_data: "get_stock" }],
-      [{ text: `⚡ Generate Temp Mail (@${DEFAULT_DOMAIN})`, callback_data: "gen_temp" }],
-      [{ text: "⚡ Generate IG Usernames", callback_data: "gen_usernames" }],
-      [{ text: "🔐 2FA Code Generator", callback_data: "menu_2fa" }]
+      [{ text: `⚡ Generate Temp Mail (@${DEFAULT_DOMAIN})`, callback_data: "gen_temp" }]
     ];
-    if (isAdmin(userId)) rows.push([{ text: "📊 Owner Stock Panel", callback_data: "admin_status" }]);
+    if (userId === OWNER_ID) rows.push([{ text: "📊 Owner Stock Panel", callback_data: "admin_status" }]);
 
     return messageId ? edit(chatId, messageId, welcomeMsg, telegramApi, { inline_keyboard: rows }) : send(chatId, welcomeMsg, telegramApi, { inline_keyboard: rows });
-  }
-
-  if (data === "menu_2fa" || text === "/2fa") {
-    const tMsg = `🔐 <b>2FA TOTP CODE GENERATOR</b>\n━━━━━━━━━━━━━━━━━━\nAapka Instagram ya kisi bhi service ka 2FA Secret Key (jaise <code>JBSWY3DPEHPK3PXP</code>) yahan bhejein. Bot turant live 6-digit code de dega!`;
-    const kb = {
-      inline_keyboard: [
-        [{ text: "🏠 Home", callback_data: "home" }]
-      ]
-    };
-    return messageId ? edit(chatId, messageId, tMsg, telegramApi, kb) : send(chatId, tMsg, telegramApi, kb);
-  }
-
-  if (text.length >= 10 && !text.includes("@") && !text.startsWith("/")) {
-    const cleanSecret = text.replace(/\s+/g, "").toUpperCase();
-    const totpCode = await generateTotpCode(cleanSecret);
-    if (totpCode) {
-      const respText = `🔐 <b>LIVE 2FA TOTP CODE</b>\n━━━━━━━━━━━━━━━━━━\n🔑 Code: <code>${totpCode}</code>\n⏳ <i>Valid for current 30s window</i>`;
-      const kb = {
-        inline_keyboard: [
-          [{ text: `📋 Copy Code: ${totpCode}`, copy_text: { text: totpCode } }],
-          [{ text: "🔐 Gen Another", callback_data: "menu_2fa" }, { text: "🏠 Home", callback_data: "home" }]
-        ]
-      };
-      return send(chatId, respText, telegramApi, kb);
-    } else {
-      return send(chatId, `❌ Invalid 2FA Secret Key! Kripya sahi Base32 secret key enter karein.`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
-    }
-  }
-
-  if (data === "gen_usernames" || text === "/usernames") {
-    const names = generateInstagramUsernames();
-    let textOut = `⚡ <b>INSTANT IG USERNAMES GENERATED</b>\n━━━━━━━━━━━━━━━━━━\n`;
-    const kbRows = [];
-    names.forEach((u, i) => {
-      textOut += `${i + 1}. <code>${u}</code>\n`;
-      kbRows.push([{ text: `📋 Copy: ${u}`, copy_text: { text: u } }]);
-    });
-    kbRows.push([
-      { text: "🔄 Generate More", callback_data: "gen_usernames" },
-      { text: "🏠 Home", callback_data: "home" }
-    ]);
-
-    return messageId
-      ? edit(chatId, messageId, textOut, telegramApi, { inline_keyboard: kbRows })
-      : send(chatId, textOut, telegramApi, { inline_keyboard: kbRows });
   }
 
   if (data === "get_stock" || text === "/get") {
@@ -1148,7 +992,8 @@ async function handleTelegramUpdate(update, ctx) {
     const kb = {
       inline_keyboard: [
         [{ text: "📋 Copy Email", copy_text: { text: email } }, { text: "🔑 Copy Pass", copy_text: { text: pass } }],
-        [{ text: "🔄 Check OTP Now", callback_data: `chk_mail:${email}` }, { text: "🌐 Live Inbox Page", url: liveInboxUrl }],
+        [{ text: "🔄 Check OTP Now", callback_data: `chk_mail:${email}` }],
+        [{ text: "🌐 Live Inbox Page (Full Mail)", url: liveInboxUrl }],
         [{ text: "🔥 Next Account", callback_data: "get_stock" }, { text: "🏠 Home", callback_data: "home" }]
       ]
     };
@@ -1168,7 +1013,8 @@ async function handleTelegramUpdate(update, ctx) {
     const kb = {
       inline_keyboard: [
         [{ text: "📋 Copy Temp Mail", copy_text: { text: email } }],
-        [{ text: "🔄 Check OTP Now", callback_data: `chk_temp:${email}` }, { text: "🌐 Live Inbox Page", url: liveInboxUrl }],
+        [{ text: "🔄 Check OTP Now", callback_data: `chk_temp:${email}` }],
+        [{ text: "🌐 Live Inbox Page (Full Mail)", url: liveInboxUrl }],
         [{ text: "⚡ Naya Temp Mail", callback_data: "gen_temp" }, { text: "🏠 Home", callback_data: "home" }]
       ]
     };

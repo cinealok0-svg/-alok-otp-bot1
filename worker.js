@@ -1,12 +1,13 @@
 /**
- * All-In-One Enterprise Bot (Ultimate Professional Edition - Real Aesthetic IG Usernames)
+ * All-In-One Enterprise Bot (Ultimate Professional Edition + 2FA TOTP Generator)
  * Features:
- *  - Real & Unique Girl Names + Aesthetic Number Combinations for IG
+ *  - 🔐 Built-In 2FA TOTP Code Generator (Google Authenticator Style)
+ *  - Hotmail/Outlook Old Messages & OTP Scan + Live Webmail Portal
  *  - Secure Multi-Admin Access Control (ADMINS_LIST whitelist)
  *  - Professional Clean Dashboard UI & Compact OTP Messages
  *  - Universal 4, 6, 8-Digit OTP Parser (Meta, Instagram, Google, etc.)
- *  - Hotmail/Outlook OAuth2 + DongvanFB Graph & Key API Fallback
- *  - Custom Domain Temp Mail (@vibepulsemedia.online) + Live Webmail Portal (/inbox)
+ *  - Custom Domain Temp Mail (@vibepulsemedia.online)
+ *  - Real Aesthetic IG Username Generator (`ishita_482` style)
  */
 
 // ================= DYNAMIC ENV BINDINGS =================
@@ -67,17 +68,16 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-// Generate Real Aesthetic IG Usernames (Real Name + Real looking numbers/underscores)
 function generateInstagramUsernames() {
   const list = [];
   const shuffled = [...REAL_GIRL_NAMES].sort(() => 0.5 - Math.random());
   
   const patterns = [
-    (name) => `${name}_${Math.floor(100 + Math.random() * 900)}`, // ishita_482
-    (name) => `${name}.${Math.floor(10 + Math.random() * 90)}`,   // riya.88
-    (name) => `${name}._${Math.floor(1000 + Math.random() * 9000)}`, // aanya._5671
-    (name) => `itz_${name}${Math.floor(1 + Math.random() * 9)}`,   // itz_khushi7
-    (name) => `${name}__official_${Math.floor(10 + Math.random() * 90)}` // sneha__official_24
+    (name) => `${name}_${Math.floor(100 + Math.random() * 900)}`,
+    (name) => `${name}.${Math.floor(10 + Math.random() * 90)}`,
+    (name) => `${name}._${Math.floor(1000 + Math.random() * 9000)}`,
+    (name) => `itz_${name}${Math.floor(1 + Math.random() * 9)}`,
+    (name) => `${name}__official_${Math.floor(10 + Math.random() * 90)}`
   ];
 
   for (let i = 0; i < 5; i++) {
@@ -93,6 +93,66 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function getLiveInboxUrl(email) {
   const base = WORKER_ORIGIN || `https://${DEFAULT_DOMAIN}`;
   return `${base}/inbox?email=${encodeURIComponent(email.toLowerCase().trim())}`;
+}
+
+// ================= 🔐 2FA TOTP GENERATOR ALGORITHM =================
+function base32ToUint8Array(base32) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let cleaned = base32.toUpperCase().replace(/=+$/, "").replace(/\s+/g, "");
+  let bits = 0;
+  let value = 0;
+  let output = [];
+
+  for (let i = 0; i < cleaned.length; i++) {
+    let idx = alphabet.indexOf(cleaned[i]);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      output.push((value >> bits) & 0xFF);
+    }
+  }
+  return new Uint8Array(output);
+}
+
+async function generateTotpCode(secret) {
+  try {
+    const cleanSecret = secret.replace(/\s+/g, "").replace(/=/g, "");
+    const keyBytes = base32ToUint8Array(cleanSecret);
+    if (keyBytes.length === 0) return null;
+
+    const epoch = Math.floor(Date.now() / 1000);
+    const timeStep = 30;
+    const counter = Math.floor(epoch / timeStep);
+
+    const buffer = new ArrayBuffer(8);
+    const view = new DataView(buffer);
+    view.setUint32(4, counter, false); // Big endian
+
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyBytes,
+      { name: "HMAC", hash: { name: "SHA-1" } },
+      false,
+      ["sign"]
+    );
+
+    const signature = await crypto.subtle.sign("HMAC", cryptoKey, buffer);
+    const hmacResult = new Uint8Array(signature);
+
+    const offset = hmacResult[hmacResult.length - 1] & 0x0F;
+    const binary =
+      ((hmacResult[offset] & 0x7F) << 24) |
+      ((hmacResult[offset + 1] & 0xFF) << 16) |
+      ((hmacResult[offset + 2] & 0xFF) << 8) |
+      (hmacResult[offset + 3] & 0xFF);
+
+    const otp = binary % 1000000;
+    return String(otp).padStart(6, "0");
+  } catch (e) {
+    return null;
+  }
 }
 
 // Service Detector
@@ -162,7 +222,7 @@ function extractSmartOtpAndLink(rawText, subjectText = "", fallbackEmail = "") {
   let link = null;
   const urlMatch = combinedRaw.match(/https?:\/\/[^\s<>"']+(?:verify|confirm|activate|token|validation|login_code|checkpoint)[^\s<>"']*/i);
   if (urlMatch) {
-    link = urlMatch[0].replace(/&amp;/g, "&").replace(/[.,;)"'>]+$/, "");
+    link = urlMatch[0].replace(/&amp;/g, "&").replace(/['\");]+$/, "");
   } else if (fallbackEmail) {
     link = getLiveInboxUrl(fallbackEmail);
   }
@@ -258,7 +318,7 @@ async function getOAuth2MailboxMessages(accountLine) {
         const tokenJson = await tokenRes.json();
         const accessToken = tokenJson.access_token;
         if (accessToken) {
-          const mailRes = await fetch("https://graph.microsoft.com/v1.0/me/messages?$top=5&$select=id,subject,from,receivedDateTime,bodyPreview,body", {
+          const mailRes = await fetch("https://graph.microsoft.com/v1.0/me/messages?$top=10&$select=id,subject,from,receivedDateTime,bodyPreview,body", {
             headers: { Authorization: `Bearer ${accessToken}` }
           });
           if (mailRes.ok) {
@@ -294,7 +354,7 @@ async function getOAuth2MailboxMessages(accountLine) {
       if (dvPostRes.ok) {
         const dvJson = await dvPostRes.json();
         const dvList = dvJson.messages || dvJson.data || [];
-        for (const m of dvList.slice(0, 5)) {
+        for (const m of dvList.slice(0, 10)) {
           const subj = m.subject || "";
           const bodyContent = m.body?.content || m.bodyPreview || "";
           const parsed = extractSmartOtpAndLink(bodyContent, subj, email);
@@ -307,7 +367,7 @@ async function getOAuth2MailboxMessages(accountLine) {
             otp: parsed.otp,
             link: parsed.link,
             service: parsed.service,
-            time: new Date().toISOString()
+            time: m.receivedDateTime || new Date().toISOString()
           });
         }
         if (messages.length > 0) return messages;
@@ -349,7 +409,7 @@ async function getOAuth2MailboxOtp(accountLine) {
   if (msgs.length > 0) {
     TEMP_MAIL_HISTORY.set(email.toLowerCase(), msgs);
     const withOtp = msgs.find(m => m.otp) || msgs[0];
-    return { otp: withOtp.otp, link: withOtp.link || getLiveInboxUrl(email), service: withOtp.service, subject: withOtp.subject, snippet: withOtp.snippet, allMessages: msgs };
+    return { otp: withOtp?.otp || null, link: withOtp?.link || getLiveInboxUrl(email), service: withOtp?.service || detectService(""), subject: withOtp?.subject || null, snippet: withOtp?.snippet || null, allMessages: msgs };
   }
   return { otp: null, link: getLiveInboxUrl(email), service: detectService(""), subject: null, snippet: null, allMessages: [] };
 }
@@ -423,7 +483,6 @@ async function resolveTargetChatForEmail(email, telegramApi) {
   return OWNER_ID || null;
 }
 
-// Clean Compact Alert Message
 function buildShortMailAlert(email, msgObj) {
   const sName = msgObj.service?.name || "Online Service";
   const sIcon = msgObj.service?.icon || "📩";
@@ -696,17 +755,47 @@ async function handleTelegramUpdate(update, ctx) {
       `━━━━━━━━━━━━━━━━━━\n` +
       `📦 Outlook Stock: <code>${left}</code>\n` +
       `🌐 Domain: <code>@${escapeHtml(DEFAULT_DOMAIN)}</code>\n` +
-      `⚡ OTP System: <code>4, 6 & 8 Digits Active</code>\n\n` +
+      `⚡ Systems: <code>OTP Parser & 2FA Active</code>\n\n` +
       `👇 <i>Apni zaroorat ke hisab se niche option select karein:</i>`;
 
     const rows = [
       [{ text: "🔥 Get Fresh Hotmail/Outlook", callback_data: "get_stock" }],
       [{ text: `⚡ Generate Temp Mail (@${DEFAULT_DOMAIN})`, callback_data: "gen_temp" }],
-      [{ text: "⚡ Generate IG Usernames", callback_data: "gen_usernames" }]
+      [{ text: "⚡ Generate IG Usernames", callback_data: "gen_usernames" }],
+      [{ text: "🔐 2FA Code Generator", callback_data: "menu_2fa" }]
     ];
     if (userIsAdmin) rows.push([{ text: "📊 Admin Control Panel", callback_data: "admin_status" }]);
 
     return messageId ? edit(chatId, messageId, welcomeMsg, telegramApi, { inline_keyboard: rows }) : send(chatId, welcomeMsg, telegramApi, { inline_keyboard: rows });
+  }
+
+  // 🔐 2FA Menu Prompt
+  if (data === "menu_2fa" || text === "/2fa") {
+    const tMsg = `🔐 <b>2FA TOTP CODE GENERATOR</b>\n━━━━━━━━━━━━━━━━━━\nAapka Instagram ya kisi bhi service ka 2FA Secret Key (jaise <code>JBSWY3DPEHPK3PXP</code>) yahan bhejें ya niche button dabayein. Bot turant live 6-digit code de dega!`;
+    const kb = {
+      inline_keyboard: [
+        [{ text: "🏠 Home", callback_data: "home" }]
+      ]
+    };
+    return messageId ? edit(chatId, messageId, tMsg, telegramApi, kb) : send(chatId, tMsg, telegramApi, kb);
+  }
+
+  // Handle 2FA Secret Key Input
+  if (text.length >= 10 && !text.includes("@") && !text.startsWith("/")) {
+    const cleanSecret = text.replace(/\s+/g, "").toUpperCase();
+    const totpCode = await generateTotpCode(cleanSecret);
+    if (totpCode) {
+      const respText = `🔐 <b>LIVE 2FA TOTP CODE</b>\n━━━━━━━━━━━━━━━━━━\n🔑 Code: <code>${totpCode}</code>\n⏳ <i>Valid for current 30s window</i>`;
+      const kb = {
+        inline_keyboard: [
+          [{ text: `📋 Copy Code: ${totpCode}`, copy_text: { text: totpCode } }],
+          [{ text: "🔐 Gen Another", callback_data: "menu_2fa" }, { text: "🏠 Home", callback_data: "home" }]
+        ]
+      };
+      return send(chatId, respText, telegramApi, kb);
+    } else {
+      return send(chatId, `❌ Invalid 2FA Secret Key! Kripya sahi Base32 secret key enter karein.`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
+    }
   }
 
   // Generate IG Usernames
@@ -790,7 +879,7 @@ async function handleTelegramUpdate(update, ctx) {
     return send(chatId, `⏳ <code>${escapeHtml(email)}</code> par abhi koi mail nahi aaya hai.`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
   }
 
-  // Global Email Lookup / Re-activation
+  // Global Email Lookup / Re-activation / Old Messages Scan
   if (data?.startsWith("chk_mail:") || text.includes("@")) {
     const rawQuery = data?.startsWith("chk_mail:") ? data.replace("chk_mail:", "").trim() : text.trim();
     const queryEmail = rawQuery.split(/[|:]/)[0].trim().toLowerCase();
@@ -813,7 +902,7 @@ async function handleTelegramUpdate(update, ctx) {
       targetLine = await findAccountLineByEmail(queryEmail, telegramApi);
     }
 
-    const wait = await send(chatId, `🔍 Checking inbox...`, telegramApi);
+    const wait = await send(chatId, `🔍 Purane messages scan kiye ja rahe hain...`, telegramApi);
     const waitId = wait ? (await wait.json())?.result?.message_id : null;
     const res = await getOAuth2MailboxOtp(targetLine);
 
@@ -822,7 +911,7 @@ async function handleTelegramUpdate(update, ctx) {
       return edit(chatId, waitId, alert.text, telegramApi, alert.reply_markup);
     } else {
       ctx.waitUntil(startOAuthAutoPush(chatId, targetLine, telegramApi));
-      return edit(chatId, waitId, `📭 Abhi koi OTP nahi mila.\n📧 <code>${escapeHtml(queryEmail)}</code>`, telegramApi, { inline_keyboard: [[{ text: "🌐 Live Inbox", url: inboxUrl }], [{ text: "🏠 Home", callback_data: "home" }]] });
+      return edit(chatId, waitId, `📭 Is inbox me koi naya OTP nahi mila.\n📧 <code>${escapeHtml(queryEmail)}</code>`, telegramApi, { inline_keyboard: [[{ text: "🌐 Live Inbox", url: inboxUrl }], [{ text: "🏠 Home", callback_data: "home" }]] });
     }
   }
 }

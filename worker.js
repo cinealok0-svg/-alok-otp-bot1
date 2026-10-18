@@ -1,12 +1,11 @@
 /**
- * All-In-One Enterprise Bot (Ultra-Optimized Cloudflare Worker Edition)
+ * All-In-One Enterprise Bot (Ultimate Fixed Edition with Refresh/OTP Check)
  * Features:
- *  - Crash-Proof & Memory-Optimized (Never stops or forgets state)
+ *  - Dedicated "🔄 Get OTP / Refresh" buttons for Outlook & Temp Mails
  *  - Smart Multi-File Stock Merge, Deduplication & Auto-Purge of Used Accounts
  *  - 🔐 Built-In 2FA TOTP Code Generator (Google Authenticator Style)
  *  - Hotmail/Outlook Old Messages & OTP Scan + Live Webmail Portal
- *  - Secure Multi-Admin Access Control (ADMINS_LIST whitelist)
- *  - Universal 4, 6, 8-Digit OTP Parser & Real Aesthetic IG Username Generator
+ *  - Secure Multi-Admin Access Control & Aesthetic IG Username Generator
  */
 
 // ================= DYNAMIC ENV BINDINGS =================
@@ -478,6 +477,7 @@ async function resolveTargetChatForEmail(email, telegramApi) {
   return OWNER_ID || null;
 }
 
+// Enhanced Alert with Refresh & OTP Check Buttons
 function buildShortMailAlert(email, msgObj) {
   const sName = msgObj.service?.name || "Online Service";
   const sIcon = msgObj.service?.icon || "📩";
@@ -494,7 +494,10 @@ function buildShortMailAlert(email, msgObj) {
   if (otp) {
     kbRows.push([{ text: `📋 COPY OTP: ${otp}`, copy_text: { text: String(otp) } }]);
   }
-  kbRows.push([{ text: "🌐 Live Inbox (Full Mail)", url: liveInboxUrl }]);
+  kbRows.push([
+    { text: "🔄 Get OTP / Refresh", callback_data: `chk_mail:${email}` },
+    { text: "🌐 Live Inbox", url: liveInboxUrl }
+  ]);
   kbRows.push([
     { text: "⚡ Naya Temp Mail", callback_data: "gen_temp" },
     { text: "🏠 Home", callback_data: "home" }
@@ -537,7 +540,7 @@ async function startTempMailAutoPush(chatId, email, telegramApi, baselineTopId =
   }
 }
 
-// ================= PERSISTENT CLOUD DATABASE HELPERS =================
+// ================= DATABASE HELPERS =================
 async function getChannelDbState(telegramApi) {
   try {
     const res = await fetch(`${telegramApi}/getChat?chat_id=${DB_CHANNEL_ID}`).then(r => r.json());
@@ -577,7 +580,7 @@ async function findAccountLineByEmail(queryEmail, telegramApi) {
 
 async function updateChannelDb(fileId, newIndex, total, msgId, telegramApi) {
   const remaining = Math.max(0, total - newIndex);
-  const dbText = `🗄️ <b>STOCK LEDGER (SAFE & PERSISTENT)</b>\n📦 Total: <code>${total}</code> | Out: <code>${newIndex}</code> | Left: <code>${remaining}</code>\n\n<code>DB_STORE: FILE:${fileId} IDX:${newIndex} TOTAL:${total}</code>`;
+  const dbText = `🗄️ <b>STOCK LEDGER</b>\n📦 Total: <code>${total}</code> | Out: <code>${newIndex}</code> | Left: <code>${remaining}</code>\n\n<code>DB_STORE: FILE:${fileId} IDX:${newIndex} TOTAL:${total}</code>`;
   if (msgId) {
     await fetch(`${telegramApi}/editMessageText`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -789,7 +792,7 @@ async function handleTelegramUpdate(update, ctx) {
       `━━━━━━━━━━━━━━━━━━\n` +
       `📦 Outlook Stock: <code>${left}</code>\n` +
       `🌐 Domain: <code>@${escapeHtml(DEFAULT_DOMAIN)}</code>\n` +
-      `⚡ Systems: <code>Crash-Proof & Persistent Active</code>\n\n` +
+      `⚡ Systems: <code>Crash-Proof & Refresh Active</code>\n\n` +
       `👇 <i>Apni zaroorat ke hisab se niche option select karein:</i>`;
 
     const rows = [
@@ -851,7 +854,7 @@ async function handleTelegramUpdate(update, ctx) {
       : send(chatId, textOut, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // Dispense Outlook Stock (With Persistent State Update)
+  // Dispense Outlook Stock (With Refresh & OTP Check Button)
   if (data === "get_stock" || text === "/get") {
     const db = await getChannelDbState(telegramApi);
     if (!db.fileId || db.index >= db.total) {
@@ -872,8 +875,14 @@ async function handleTelegramUpdate(update, ctx) {
     const kb = {
       inline_keyboard: [
         [{ text: "📋 Copy Email", copy_text: { text: email } }, { text: "🔑 Copy Pass", copy_text: { text: pass } }],
-        [{ text: "🌐 Live Inbox", url: inboxUrl }],
-        [{ text: "🔥 Next", callback_data: "get_stock" }, { text: "🏠 Home", callback_data: "home" }]
+        [
+          { text: "🔄 Get OTP / Refresh", callback_data: `chk_mail:${email}` },
+          { text: "🌐 Live Inbox", url: inboxUrl }
+        ],
+        [
+          { text: "🔥 Next", callback_data: "get_stock" },
+          { text: "🏠 Home", callback_data: "home" }
+        ]
       ]
     };
 
@@ -892,9 +901,14 @@ async function handleTelegramUpdate(update, ctx) {
     const kb = {
       inline_keyboard: [
         [{ text: "📋 Copy Email", copy_text: { text: email } }],
-        [{ text: "⚡ Generate IG Usernames", callback_data: "gen_usernames" }],
-        [{ text: "🌐 Live Inbox", url: inboxUrl }],
-        [{ text: "⚡ Naya", callback_data: "gen_temp" }, { text: "🏠 Home", callback_data: "home" }]
+        [
+          { text: "🔄 Check OTP / Refresh", callback_data: `chk_mail:${email}` },
+          { text: "🌐 Live Inbox", url: inboxUrl }
+        ],
+        [
+          { text: "⚡ Naya", callback_data: "gen_temp" },
+          { text: "🏠 Home", callback_data: "home" }
+        ]
       ]
     };
 
@@ -914,7 +928,7 @@ async function handleTelegramUpdate(update, ctx) {
     return send(chatId, `⏳ <code>${escapeHtml(email)}</code> par abhi koi mail nahi aaya hai.`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
   }
 
-  // Global Email Lookup / Re-activation / Old Messages Scan
+  // Global Email Lookup / Re-activation / Old Messages Scan with Refresh
   if (data?.startsWith("chk_mail:") || text.includes("@")) {
     const rawQuery = data?.startsWith("chk_mail:") ? data.replace("chk_mail:", "").trim() : text.trim();
     const queryEmail = rawQuery.split(/[|:]/)[0].trim().toLowerCase();

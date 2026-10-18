@@ -1,14 +1,13 @@
 /**
- * All-In-One Enterprise Bot (Ultimate Fixed Edition with Refresh/OTP Check)
+ * All-In-One Enterprise Bot (Absolute Ultimate Complete Edition)
  * Features:
- *  - Dedicated "🔄 Get OTP / Refresh" buttons for Outlook & Temp Mails
+ *  - Full Robust Multi-API Hotmail/Outlook & Temp Mail OTP Engine
+ *  - Compact UI Text with Full Functionality & Fast Refresh Buttons
  *  - Smart Multi-File Stock Merge, Deduplication & Auto-Purge of Used Accounts
- *  - 🔐 Built-In 2FA TOTP Code Generator (Google Authenticator Style)
- *  - Hotmail/Outlook Old Messages & OTP Scan + Live Webmail Portal
- *  - Secure Multi-Admin Access Control & Aesthetic IG Username Generator
+ *  - 🔐 Built-In 2FA TOTP Code Generator & Aesthetic IG Username Generator
+ *  - Secure Multi-Admin Access Control & Live Webmail Portal (/inbox)
  */
 
-// ================= DYNAMIC ENV BINDINGS =================
 let BOT_TOKEN = "";
 let OWNER_ID = "";
 let DB_CHANNEL_ID = "";
@@ -16,7 +15,6 @@ let DONGVAN_API_KEY = "";
 let DEFAULT_DOMAIN = "vibepulsemedia.online";
 let WORKER_ORIGIN = "";
 
-// Multi-Admin Whitelist
 const ADMINS_LIST = new Set();
 
 const REAL_GIRL_NAMES = [
@@ -29,7 +27,6 @@ const REAL_GIRL_NAMES = [
 const EMAIL_TO_CHAT = new Map();
 const TEMP_MAIL_HISTORY = new Map();
 
-// ================= UTILITIES =================
 function initEnv(env, requestUrl = "") {
   BOT_TOKEN = env?.BOT_TOKEN || "";
   OWNER_ID = String(env?.OWNER_ID || "").trim();
@@ -90,7 +87,7 @@ function getLiveInboxUrl(email) {
   return `${base}/inbox?email=${encodeURIComponent(email.toLowerCase().trim())}`;
 }
 
-// ================= 🔐 2FA TOTP GENERATOR ALGORITHM =================
+// 🔐 2FA TOTP GENERATOR
 function base32ToUint8Array(base32) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let cleaned = base32.toUpperCase().replace(/=+$/, "").replace(/\s+/g, "");
@@ -118,8 +115,7 @@ async function generateTotpCode(secret) {
     if (keyBytes.length === 0) return null;
 
     const epoch = Math.floor(Date.now() / 1000);
-    const timeStep = 30;
-    const counter = Math.floor(epoch / timeStep);
+    const counter = Math.floor(epoch / 30);
 
     const buffer = new ArrayBuffer(8);
     const view = new DataView(buffer);
@@ -143,21 +139,19 @@ async function generateTotpCode(secret) {
       ((hmacResult[offset + 2] & 0xFF) << 8) |
       (hmacResult[offset + 3] & 0xFF);
 
-    const otp = binary % 1000000;
-    return String(otp).padStart(6, "0");
+    return String(binary % 1000000).padStart(6, "0");
   } catch (e) {
     return null;
   }
 }
 
-// Service Detector
 function detectService(rawText) {
   const lower = String(rawText || "").toLowerCase();
   if (lower.includes("instagram") || lower.includes("ig-")) return { name: "Instagram", icon: "📸" };
-  if (lower.includes("facebook") || lower.includes("meta") || lower.includes("fb-") || lower.includes("authenticate your profile")) return { name: "Facebook / Meta", icon: "🌐" };
+  if (lower.includes("facebook") || lower.includes("meta") || lower.includes("fb-")) return { name: "Facebook / Meta", icon: "🌐" };
   if (lower.includes("whatsapp")) return { name: "WhatsApp", icon: "💬" };
   if (lower.includes("telegram")) return { name: "Telegram", icon: "✈️" };
-  if (lower.includes("google") || lower.includes("gmail") || lower.includes("youtube")) return { name: "Google / YouTube", icon: "🔍" };
+  if (lower.includes("google") || lower.includes("gmail")) return { name: "Google / YouTube", icon: "🔍" };
   if (lower.includes("microsoft") || lower.includes("outlook") || lower.includes("hotmail")) return { name: "Microsoft", icon: "🪟" };
   return { name: "Online Service", icon: "📩" };
 }
@@ -282,7 +276,7 @@ function parseStrictStockLines(rawContent) {
   return valid;
 }
 
-// ================= OUTLOOK / HOTMAIL RESOLVER =================
+// ROBUST OUTLOOK / HOTMAIL RESOLVER WITH MULTI-API FALLBACK
 async function getOAuth2MailboxMessages(accountLine) {
   if (!accountLine) return [];
   const rawLine = accountLine.trim();
@@ -301,6 +295,7 @@ async function getOAuth2MailboxMessages(accountLine) {
   }
 
   const messages = [];
+
   if (refreshToken) {
     try {
       const tokenRes = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
@@ -370,13 +365,19 @@ async function getOAuth2MailboxMessages(accountLine) {
   }
 
   try {
-    const res = await fetch(`https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(rawLine)}`, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const dvUrl = DONGVAN_API_KEY 
+      ? `https://api.dongvanfb.com/user/get_code_oauth?apikey=${DONGVAN_API_KEY}&mail=${encodeURIComponent(rawLine)}`
+      : `https://tools.dongvanfb.net/api/get_code?mail=${encodeURIComponent(rawLine)}`;
+    
+    const res = await fetch(dvUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
     if (res.ok) {
       const txt = await res.text();
       let json = null;
       try { json = JSON.parse(txt); } catch (e) {}
-      const directCode = json?.code || json?.otp || json?.data?.code;
-      const parsed = extractSmartOtpAndLink(txt, json?.subject || "", email);
+      
+      const directCode = json?.code || json?.otp || json?.data?.code || json?.message;
+      const parsed = extractSmartOtpAndLink(txt, json?.subject || json?.title || "", email);
+      
       if (directCode || parsed.otp) {
         messages.push({
           id: String(Date.now()),
@@ -408,7 +409,6 @@ async function getOAuth2MailboxOtp(accountLine) {
   return { otp: null, link: getLiveInboxUrl(email), service: detectService(""), subject: null, snippet: null, allMessages: [] };
 }
 
-// ================= CUSTOM DOMAIN STATE STORE =================
 async function saveTempMailState(email, chatId, newMsgRecord = null, telegramApi) {
   const cleanEmail = email.toLowerCase().trim();
   if (chatId) EMAIL_TO_CHAT.set(cleanEmail, String(chatId));
@@ -477,7 +477,6 @@ async function resolveTargetChatForEmail(email, telegramApi) {
   return OWNER_ID || null;
 }
 
-// Enhanced Alert with Refresh & OTP Check Buttons
 function buildShortMailAlert(email, msgObj) {
   const sName = msgObj.service?.name || "Online Service";
   const sIcon = msgObj.service?.icon || "📩";
@@ -506,7 +505,6 @@ function buildShortMailAlert(email, msgObj) {
   return { text, reply_markup: { inline_keyboard: kbRows } };
 }
 
-// ================= BACKGROUND LISTENERS =================
 async function startOAuthAutoPush(chatId, accountData, telegramApi) {
   const email = accountData.split(/[|:]/)[0]?.trim();
   for (let i = 0; i < 15; i++) {
@@ -540,7 +538,6 @@ async function startTempMailAutoPush(chatId, email, telegramApi, baselineTopId =
   }
 }
 
-// ================= DATABASE HELPERS =================
 async function getChannelDbState(telegramApi) {
   try {
     const res = await fetch(`${telegramApi}/getChat?chat_id=${DB_CHANNEL_ID}`).then(r => r.json());
@@ -607,7 +604,6 @@ async function deleteMessage(chatId, messageId, telegramApi) {
   return fetch(`${telegramApi}/deleteMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, message_id: messageId }) }).catch(() => null);
 }
 
-// ================= LIVE WEBMAIL PAGE (/inbox) =================
 async function renderLiveWebmailPage(emailQuery, telegramApi) {
   const cleanEmail = (emailQuery || "").toLowerCase().trim();
   if (!cleanEmail || !cleanEmail.includes("@")) return new Response("Invalid Email", { status: 400 });
@@ -628,7 +624,6 @@ async function renderLiveWebmailPage(emailQuery, telegramApi) {
   return new Response(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="6"><title>Inbox - ${escapeHtml(cleanEmail)}</title><style>body{background:#0f172a;color:#f8fafc;font-family:sans-serif;padding:16px;margin:0;}</style></head><body><div style="max-width:600px;margin:0 auto;"><div style="background:#1e293b;padding:14px;border-radius:12px;margin-bottom:14px;"><div style="font-size:11px;color:#94a3b8;">LIVE INBOX</div><div style="font-size:14px;font-weight:bold;color:#38bdf8;word-break:break-all;">${escapeHtml(cleanEmail)}</div></div>${cardsHtml}</div></body></html>`, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-// ================= WORKER ENTRY =================
 export default {
   async fetch(request, env, ctx) {
     initEnv(env, request.url);
@@ -676,7 +671,6 @@ export default {
   }
 };
 
-// ================= MAIN TELEGRAM ROUTER =================
 async function handleTelegramUpdate(update, ctx) {
   const telegramApi = `https://api.telegram.org/bot${BOT_TOKEN}`;
   const msg = update.message;
@@ -721,7 +715,6 @@ async function handleTelegramUpdate(update, ctx) {
     }
   }
 
-  // Smart Multi-File Upload & Persistent Merge Handler
   if (msg?.document) {
     if (!userIsAdmin) return send(chatId, "⚠️ Access Denied! Kewal authorized admins stock upload kar sakte hain.", telegramApi);
     const doc = msg.document;
@@ -782,7 +775,6 @@ async function handleTelegramUpdate(update, ctx) {
     }
   }
 
-  // Home / Start Menu
   if (text === "/start" || data === "home") {
     const db = await getChannelDbState(telegramApi);
     const left = Math.max(0, db.total - db.index);
@@ -792,7 +784,7 @@ async function handleTelegramUpdate(update, ctx) {
       `━━━━━━━━━━━━━━━━━━\n` +
       `📦 Outlook Stock: <code>${left}</code>\n` +
       `🌐 Domain: <code>@${escapeHtml(DEFAULT_DOMAIN)}</code>\n` +
-      `⚡ Systems: <code>Crash-Proof & Refresh Active</code>\n\n` +
+      `⚡ Systems: <code>Full Engine Active</code>\n\n` +
       `👇 <i>Apni zaroorat ke hisab se niche option select karein:</i>`;
 
     const rows = [
@@ -806,7 +798,6 @@ async function handleTelegramUpdate(update, ctx) {
     return messageId ? edit(chatId, messageId, welcomeMsg, telegramApi, { inline_keyboard: rows }) : send(chatId, welcomeMsg, telegramApi, { inline_keyboard: rows });
   }
 
-  // 🔐 2FA Menu Prompt
   if (data === "menu_2fa" || text === "/2fa") {
     const tMsg = `🔐 <b>2FA TOTP CODE GENERATOR</b>\n━━━━━━━━━━━━━━━━━━\nAapka Instagram ya kisi bhi service ka 2FA Secret Key (jaise <code>JBSWY3DPEHPK3PXP</code>) yahan bhejें ya niche button dabayein. Bot turant live 6-digit code de dega!`;
     const kb = {
@@ -817,7 +808,6 @@ async function handleTelegramUpdate(update, ctx) {
     return messageId ? edit(chatId, messageId, tMsg, telegramApi, kb) : send(chatId, tMsg, telegramApi, kb);
   }
 
-  // Handle 2FA Secret Key Input
   if (text.length >= 10 && !text.includes("@") && !text.startsWith("/")) {
     const cleanSecret = text.replace(/\s+/g, "").toUpperCase();
     const totpCode = await generateTotpCode(cleanSecret);
@@ -835,7 +825,6 @@ async function handleTelegramUpdate(update, ctx) {
     }
   }
 
-  // Generate IG Usernames
   if (data === "gen_usernames" || text === "/usernames") {
     const names = generateInstagramUsernames();
     let textOut = `⚡ <b>INSTANT IG USERNAMES GENERATED</b>\n━━━━━━━━━━━━━━━━━━\n`;
@@ -854,7 +843,6 @@ async function handleTelegramUpdate(update, ctx) {
       : send(chatId, textOut, telegramApi, { inline_keyboard: kbRows });
   }
 
-  // Dispense Outlook Stock (With Refresh & OTP Check Button)
   if (data === "get_stock" || text === "/get") {
     const db = await getChannelDbState(telegramApi);
     if (!db.fileId || db.index >= db.total) {
@@ -891,7 +879,6 @@ async function handleTelegramUpdate(update, ctx) {
     return;
   }
 
-  // Generate Temp Mail
   if (data === "gen_temp" || text === "/temp") {
     const email = `${getRandomUser()}@${DEFAULT_DOMAIN}`;
     await saveTempMailState(email, chatId, null, telegramApi);
@@ -917,7 +904,6 @@ async function handleTelegramUpdate(update, ctx) {
     return;
   }
 
-  // Manual Check Temp Mail
   if (data?.startsWith("chk_temp:")) {
     const email = data.replace("chk_temp:", "").trim().toLowerCase();
     const list = await getTempMailMessages(email, telegramApi);
@@ -928,7 +914,6 @@ async function handleTelegramUpdate(update, ctx) {
     return send(chatId, `⏳ <code>${escapeHtml(email)}</code> par abhi koi mail nahi aaya hai.`, telegramApi, { inline_keyboard: [[{ text: "🏠 Home", callback_data: "home" }]] });
   }
 
-  // Global Email Lookup / Re-activation / Old Messages Scan with Refresh
   if (data?.startsWith("chk_mail:") || text.includes("@")) {
     const rawQuery = data?.startsWith("chk_mail:") ? data.replace("chk_mail:", "").trim() : text.trim();
     const queryEmail = rawQuery.split(/[|:]/)[0].trim().toLowerCase();

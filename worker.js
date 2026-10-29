@@ -2,22 +2,21 @@ const META_AI = "https://www.meta.ai/";
 const ACCOUNT_CENTER = "https://accountscenter.facebook.com/";
 const META_HELP = "https://www.facebook.com/help/";
 
-function html() {
+function makePage() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#080d1b">
 <title>Meta AI Hub</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
 <style>
 *{box-sizing:border-box}
 body{
- margin:0;padding:18px 15px 100px;
- background:radial-gradient(circle at top right,#263c70,transparent 35%),#080d1b;
- color:#f5f7ff;font-family:system-ui,Arial,sans-serif;
+ margin:0;padding:18px 15px 95px;
+ background:radial-gradient(circle at top right,#263d70,transparent 35%),#080d1b;
+ color:#f5f7ff;font-family:Arial,system-ui,sans-serif
 }
 .wrap{max-width:600px;margin:auto}
 header{display:flex;align-items:center;gap:12px;margin:10px 0 24px}
@@ -27,26 +26,26 @@ header{display:flex;align-items:center;gap:12px;margin:10px 0 24px}
  background:linear-gradient(135deg,#7189ff,#4ce0cb)
 }
 h1{font-size:20px;margin:0}
-.small{font-size:12px;color:#9eabc7;margin-top:4px}
+.small{font-size:12px;color:#aab7d1;margin-top:4px}
 .hero{
- padding:24px;border-radius:24px;
+ padding:24px;border-radius:23px;
  background:linear-gradient(135deg,#1d2e59,#12333b);
- border:1px solid #ffffff16
+ border:1px solid #ffffff18
 }
-.hero h2{font-size:28px;line-height:1.2;margin:10px 0}
-.hero p,.card p{color:#aab7d1;font-size:13px;line-height:1.6}
+.hero h2{font-size:28px;line-height:1.2}
+p{color:#aab7d1;font-size:13px;line-height:1.6}
 button{font:inherit;cursor:pointer}
 .primary{
  border:0;border-radius:13px;padding:12px 16px;
  background:linear-gradient(100deg,#7189ff,#4ce0cb);
- color:#081323;font-weight:800
+ color:#081323;font-weight:bold
 }
-.title{margin:26px 2px 12px;font-weight:800}
+.title{margin:25px 2px 12px;font-weight:bold}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .card{
- min-height:145px;padding:17px;text-align:left;
+ min-height:140px;padding:16px;text-align:left;
  color:white;background:#121b30;
- border:1px solid #ffffff12;border-radius:20px
+ border:1px solid #ffffff15;border-radius:20px
 }
 .icon{font-size:27px;margin-bottom:12px}
 .card h3{font-size:15px;margin:0}
@@ -54,27 +53,25 @@ button{font:inherit;cursor:pointer}
 .page{display:none}
 .page.active{display:block}
 .detail{
- background:#121b30;border:1px solid #ffffff12;
- padding:22px;border-radius:22px
+ background:#121b30;border:1px solid #ffffff15;
+ padding:21px;border-radius:22px
 }
 .detail h2{margin:10px 0}
 .back,.action{
  display:block;width:100%;padding:13px;margin-top:12px;
- border-radius:12px;border:1px solid #ffffff12;
+ border-radius:12px;border:1px solid #ffffff15;
  background:#263657;color:white;text-align:center;
- text-decoration:none;font-weight:700
+ text-decoration:none;font-weight:bold
 }
 .action.main{background:linear-gradient(100deg,#7189ff,#4ce0cb);color:#081323}
 .notice{
- margin-top:17px;padding:15px;border-radius:15px;
- background:#10192a;border:1px solid #ffffff12;
- font-size:12px;color:#aab7d1;line-height:1.6
+ margin-top:17px;padding:14px;border-radius:15px;
+ background:#10192a;color:#aab7d1;font-size:12px;line-height:1.6
 }
 .bottom{
  position:fixed;bottom:0;left:0;right:0;
- padding:9px 7px calc(9px + env(safe-area-inset-bottom));
- background:#080d1bf2;border-top:1px solid #ffffff15;
- backdrop-filter:blur(15px)
+ padding:8px 6px;background:#080d1bf5;
+ border-top:1px solid #ffffff15
 }
 .nav{max-width:600px;margin:auto;display:grid;grid-template-columns:repeat(4,1fr)}
 .nav button{border:0;background:none;color:#8998b7;font-size:11px;padding:7px 0}
@@ -82,100 +79,82 @@ button{font:inherit;cursor:pointer}
 .nav button.active{color:#9eb4ff}
 </style>
 </head>
-
 <body>
 <div class="wrap">
-
 <header>
  <div class="logo">✦</div>
- <div>
-  <h1>Meta AI Hub</h1>
-  <div class="small">Your account shortcuts</div>
- </div>
+ <div><h1>Meta AI Hub</h1><div class="small">Your account shortcuts</div></div>
 </header>
 
 <main>
 <section id="home" class="page active">
  <div class="hero">
   <div class="small">WELCOME TO YOUR HUB</div>
-  <h2>Everything you need in one place.</h2>
+  <h2>Everything in one place.</h2>
   <p>Quick access to Meta AI and official account settings.</p>
   <button class="primary" onclick="external(META_AI)">🤖 Open Meta AI ↗</button>
  </div>
 
  <div class="title">Quick Access</div>
-
  <div class="grid">
-  <button class="card" onclick="page('meta')">
-   <div class="icon">🤖</div>
-   <h3>Meta AI</h3>
-   <p>Open the official Meta AI website.</p>
+  <button class="card" onclick="showPage('meta')">
+   <div class="icon">🤖</div><h3>Meta AI</h3>
+   <p>Open the official website.</p>
   </button>
-
-  <button class="card" onclick="page('account')">
-   <div class="icon">👤</div>
-   <h3>Account Center</h3>
-   <p>Visit official account settings.</p>
+  <button class="card" onclick="showPage('account')">
+   <div class="icon">👤</div><h3>Account Center</h3>
+   <p>Visit account settings.</p>
   </button>
-
-  <button class="card" onclick="page('email')">
-   <div class="icon">📧</div>
-   <h3>Email / Contact</h3>
-   <p>Manage contact details on Meta.</p>
+  <button class="card" onclick="showPage('email')">
+   <div class="icon">📧</div><h3>Email / Contact</h3>
+   <p>Manage details on Meta.</p>
   </button>
-
-  <button class="card" onclick="page('help')">
-   <div class="icon">🛡️</div>
-   <h3>Help & Safety</h3>
-   <p>Security tips and help resources.</p>
+  <button class="card" onclick="showPage('help')">
+   <div class="icon">🛡️</div><h3>Help & Safety</h3>
+   <p>Security and help resources.</p>
   </button>
  </div>
-
  <div class="notice">
-  🔐 Security: Enter your password and verification codes only
-  on official Meta websites. This Mini App never collects them.
+  🔐 Never share passwords, verification codes or login cookies with a bot.
+  Sign in only on official Meta websites.
  </div>
 </section>
 
 <section id="meta" class="page">
- <button class="back" onclick="page('home')">← Back to Home</button>
+ <button class="back" onclick="showPage('home')">← Back</button>
  <div class="detail">
-  <div class="icon">🤖</div>
-  <h2>Meta AI</h2>
+  <div class="icon">🤖</div><h2>Meta AI</h2>
   <p>Open the official Meta AI website. Login persistence depends on your browser and Meta settings.</p>
   <button class="action main" onclick="external(META_AI)">Open Meta AI ↗</button>
  </div>
 </section>
 
 <section id="account" class="page">
- <button class="back" onclick="page('home')">← Back to Home</button>
+ <button class="back" onclick="showPage('home')">← Back</button>
  <div class="detail">
-  <div class="icon">👤</div>
-  <h2>Meta Account Center</h2>
-  <p>Visit Meta to review supported account settings.</p>
+  <div class="icon">👤</div><h2>Account Center</h2>
+  <p>Review available account settings on Meta's official website.</p>
   <button class="action main" onclick="external(ACCOUNT_CENTER)">Open Account Center ↗</button>
-  <button class="action" onclick="external(META_HELP)">Meta Help Center ↗</button>
+  <button class="action" onclick="external(META_HELP)">Meta Help ↗</button>
  </div>
 </section>
 
 <section id="email" class="page">
- <button class="back" onclick="page('home')">← Back to Home</button>
+ <button class="back" onclick="showPage('home')">← Back</button>
  <div class="detail">
-  <div class="icon">📧</div>
-  <h2>Email & Contact Info</h2>
-  <p>Use Meta's official settings to review or update supported email and contact details.</p>
-  <button class="action main" onclick="external(ACCOUNT_CENTER)">Manage via Account Center ↗</button>
+  <div class="icon">📧</div><h2>Email & Contact Info</h2>
+  <p>Use the official Meta Account Center to review supported contact details.</p>
+  <button class="action main" onclick="external(ACCOUNT_CENTER)">Open Account Center ↗</button>
   <button class="action" onclick="external(META_HELP)">Official Help ↗</button>
-  <div class="notice">Never share your password, OTP or login cookies with a bot.</div>
+  <div class="notice">This Mini App does not read Gmail or collect account passwords and OTPs.</div>
  </div>
 </section>
 
 <section id="help" class="page">
- <button class="back" onclick="page('home')">← Back to Home</button>
+ <button class="back" onclick="showPage('home')">← Back</button>
  <div class="detail">
-  <div class="icon">🛡️</div>
-  <h2>Help & Safety</h2>
-  <p>Always check the website address before signing in. Use official Meta support for account recovery.</p>
+  <div class="icon">🛡️</div><h2>Help & Safety</h2>
+  <p>Check the website address before signing in. Use official support for account recovery.</p>
   <button class="action main" onclick="external(META_HELP)">Open Meta Help ↗</button>
  </div>
 </section>
@@ -184,14 +163,18 @@ button{font:inherit;cursor:pointer}
 
 <div class="bottom">
  <div class="nav">
-  <button class="active" data-page="home" onclick="page('home')"><span>⌂</span>Home</button>
-  <button data-page="meta" onclick="page('meta')"><span>✦</span>Meta AI</button>
-  <button data-page="account" onclick="page('account')"><span>👤</span>Account</button>
-  <button data-page="email" onclick="page('email')"><span>✉</span>Email</button>
+  <button class="active" data-page="home" onclick="showPage('home')"><span>⌂</span>Home</button>
+  <button data-page="meta" onclick="showPage('meta')"><span>✦</span>Meta AI</button>
+  <button data-page="account" onclick="showPage('account')"><span>👤</span>Account</button>
+  <button data-page="email" onclick="showPage('email')"><span>✉</span>Email</button>
  </div>
 </div>
 
 <script>
+const META_AI = "https://www.meta.ai/";
+const ACCOUNT_CENTER = "https://accountscenter.facebook.com/";
+const META_HELP = "https://www.facebook.com/help/";
+
 const tg = window.Telegram && window.Telegram.WebApp
  ? window.Telegram.WebApp : null;
 
@@ -204,14 +187,14 @@ if(tg){
  }catch(e){}
 }
 
-function page(id){
- document.querySelectorAll(".page").forEach(x=>{
-  x.classList.toggle("active",x.id===id);
+function showPage(id){
+ document.querySelectorAll(".page").forEach(p=>{
+  p.classList.toggle("active",p.id===id);
  });
- document.querySelectorAll(".nav button").forEach(x=>{
-  x.classList.toggle("active",x.dataset.page===id);
+ document.querySelectorAll(".nav button").forEach(b=>{
+  b.classList.toggle("active",b.dataset.page===id);
  });
- window.scrollTo({top:0,behavior:"smooth"});
+ window.scrollTo(0,0);
 }
 
 function external(url){
@@ -226,137 +209,133 @@ function external(url){
 </html>`;
 }
 
-async function telegram(method, token, data) {
-  const response = await fetch(
-    "https://api.telegram.org/bot" + token + "/" + method,
+async function callTelegram(env, method, data) {
+  return fetch(
+    "https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + method,
     {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(data)
     }
   );
-  return await response.json();
-}
-
-async function sendMessage(token, chatId, text, keyboard) {
-  return telegram("sendMessage", token, {
-    chat_id: chatId,
-    text,
-    reply_markup: keyboard
-  });
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const token = env.BOT_TOKEN;
 
-    // Mini App website
+    // Website / Telegram Mini App
     if (request.method === "GET" && url.pathname === "/") {
-      return new Response(html(), {
+      return new Response(makePage(), {
         headers: {
-          "Content-Type": "text/html; charset=UTF-8",
-          "X-Content-Type-Options": "nosniff",
-          "Referrer-Policy": "strict-origin-when-cross-origin"
+          "Content-Type": "text/html;charset=UTF-8",
+          "X-Content-Type-Options": "nosniff"
         }
       });
     }
 
-    if (!token) {
-      return new Response(
-        "BOT_TOKEN secret is missing. Add it in Cloudflare Worker Settings.",
-        {status: 500}
-      );
+    // Health check
+    if (request.method === "GET" && url.pathname === "/health") {
+      return new Response("Worker is running.");
     }
 
-    // One-time setup: open /setup?key=YOUR_SETUP_KEY
-    // Set both BOT_TOKEN and SETUP_KEY as Worker secrets.
+    if (!env.BOT_TOKEN) {
+      return new Response("BOT_TOKEN Secret is missing.", {status:500});
+    }
+
+    // Configure Telegram webhook once using a secret setup key
     if (request.method === "GET" && url.pathname === "/setup") {
-      if (!env.SETUP_KEY || url.searchParams.get("key") !== env.SETUP_KEY) {
-        return new Response("Unauthorized", {status: 401});
+      if (!env.SETUP_KEY ||
+          url.searchParams.get("key") !== env.SETUP_KEY) {
+        return new Response("Unauthorized", {status:401});
       }
 
-      const webhookUrl = url.origin + "/telegram";
-      const result = await telegram("setWebhook", token, {
-        url: webhookUrl,
+      const response = await callTelegram(env, "setWebhook", {
+        url: url.origin + "/telegram",
         allowed_updates: ["message"]
       });
 
+      const result = await response.json();
+
       return new Response(
-        result.ok
-          ? "Webhook configured successfully. You can now open your Telegram bot."
-          : "Webhook setup failed: " + JSON.stringify(result),
-        {headers: {"Content-Type": "text/plain; charset=UTF-8"}}
+        result.ok ? "Webhook configured successfully." :
+        "Webhook setup failed: " + JSON.stringify(result),
+        {headers: {"Content-Type":"text/plain;charset=UTF-8"}}
       );
     }
 
-    // Telegram webhook endpoint
+    // Telegram webhook
     if (request.method === "POST" && url.pathname === "/telegram") {
       let update;
+
       try {
         update = await request.json();
       } catch {
-        return new Response("Invalid JSON", {status: 400});
+        return new Response("Invalid JSON", {status:400});
       }
 
       if (update.message) {
-        const message = update.message;
-        const chatId = message.chat.id;
-        const text = (message.text || "").trim();
-        const firstName = message.from?.first_name || "there";
-        const appUrl = url.origin;
+        const msg = update.message;
+        const chatId = msg.chat.id;
+        const command = (msg.text || "").trim();
+        const name = msg.from?.first_name || "there";
 
         const keyboard = {
           inline_keyboard: [
-            [{text: "🚀 Open Mini App", web_app: {url: appUrl}}],
+            [{text:"🚀 Open Mini App",web_app:{url:url.origin}}],
             [
-              {text: "🤖 Meta AI", url: META_AI},
-              {text: "👤 Account Center", url: ACCOUNT_CENTER}
+              {text:"🤖 Meta AI",url:META_AI},
+              {text:"👤 Account Center",url:ACCOUNT_CENTER}
             ],
-            [{text: "❓ Help", callback_data: "help"}]
+            [{text:"❓ Help",callback_data:"help"}]
           ]
         };
 
-        if (text === "/start" || text.startsWith("/start ")) {
-          await sendMessage(
-            token,
-            chatId,
-            "👋 Hello, " + firstName + "!\n\n" +
+        let text;
+
+        if (command === "/start" || command.startsWith("/start ")) {
+          text =
+            "👋 Hello, " + name + "!\n\n" +
             "Welcome to Meta AI Hub.\n\n" +
-            "🚀 Open the Mini App using the button below.\n" +
-            "🤖 Visit the official Meta AI website.\n" +
-            "👤 Open Meta Account Center.\n\n" +
-            "🔐 Never share your Meta password or OTP with a bot.",
-            keyboard
-          );
-        } else if (text === "/help") {
-          await sendMessage(
-            token,
-            chatId,
+            "Use the buttons below to open the Mini App, Meta AI or Account Center.\n\n" +
+            "🔐 Never share your password or OTP with a bot.";
+        } else if (command === "/help") {
+          text =
             "ℹ️ Help\n\n" +
-            "Tap Open Mini App to use the dashboard.\n" +
+            "Open the Mini App using the button below.\n" +
             "Meta AI: " + META_AI + "\n" +
-            "Account Center: " + ACCOUNT_CENTER + "\n\n" +
-            "This bot does not collect passwords, OTPs or login cookies.",
-            keyboard
-          );
+            "Account Center: " + ACCOUNT_CENTER;
         } else {
-          await sendMessage(
-            token,
-            chatId,
-            "Use the buttons below to open Meta AI Hub.",
-            keyboard
-          );
+          text = "Choose an option from the menu below.";
+        }
+
+        await callTelegram(env, "sendMessage", {
+          chat_id:chatId,
+          text,
+          reply_markup:keyboard
+        });
+      }
+
+      if (update.callback_query) {
+        const q = update.callback_query;
+
+        await callTelegram(env, "answerCallbackQuery", {
+          callback_query_id:q.id
+        });
+
+        if (q.data === "help") {
+          await callTelegram(env, "sendMessage", {
+            chat_id:q.message.chat.id,
+            text:"Use Open Mini App to access the dashboard.\n\n" +
+              "Meta AI: " + META_AI + "\n" +
+              "Account Center: " + ACCOUNT_CENTER
+          });
         }
       }
 
       return new Response("OK");
     }
 
-    if (request.method === "GET" && url.pathname === "/health") {
-      return new Response("Meta AI Hub Worker is running.");
-    }
-
-    return new Response("Not found", {status: 404});
+    return new Response("Not found", {status:404});
   }
 };
